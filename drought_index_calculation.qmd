@@ -24,7 +24,7 @@ Collect raw monthly precipitation (Input)
 
 You need a long time series of monthly precipitation for each pixel or station. A minimum of 30 years is recommended so the distribution is well estimated.
 
-one value per pixel per month. It needs a continuous time series ordered by time.
+One value per pixel per month. It needs a continuous time series ordered by time.
 
 **Step 2**
 
@@ -37,7 +37,9 @@ SPI-3 for March = precip(Jan) + precip(Feb) + precip(Mar)
 
 
 Why different scales?\
-SPI-3 captures short-term agricultural drought. SPI-6 reflects medium-term hydrological conditions. SPI-12 tracks long-term groundwater and reservoir trends.
+SPI-3 captures short-term agricultural drought.\
+SPI-6 reflects medium-term hydrological conditions.\
+SPI-12 tracks long-term groundwater and reservoir trends.
 
 **Step 3**
 
@@ -45,6 +47,12 @@ Fit a Gamma distribution — per calendar month (Statistics)
 
 
 This is the core statistical step. A Gamma distribution is fitted separately for each calendar month at each pixel using Maximum Likelihood Estimation (MLE). So January gets its own fit, February its own, etc. — because precipitation is seasonal.
+
+These disributions are based on 3 moth sum, For instance March we take the sum of Jan + Feb + Mar so this sum use to establish the gamma distribution\
+
+Why not single month prcep. why it use three months sum?
+
+Single month precipitation is very noisy — one unusually dry month tells you very little about actual drought.
 
 
 Gamma ($\alpha, \beta$) where ; $\alpha$ = shape  ·   $\beta$ = scale
@@ -404,14 +412,10 @@ Collect raw monthly precipitation + temperature + lattitude (Input)
 
 SPEI needs three inputs per pixel per month — this is the key difference from SPI which only needs precipitation. A minimum of 30 years is recommended.
 
-SPI needs : monthly_precip only
-
-SPEI needs : monthly_precip + mean_temp_monthly + latitude (y)
-
 
 **Step 2**
 
-Compute PET via Thornthwaite - following I add notes on how to calculate the PET from this method and, it may be ad-hoc this time but it give some idea how that number came from and if if needs to compare the process with more advance PET calculation such as Penmanth.
+Compute PET via Thornthwaite - following I add notes on how to calculate the PET from this method and, it may be ad-hoc this time but it give some idea how that number came from and if it needs to compare the process with more advance PET calculation such as Penmanth.
 
 Potential Evapotranspiration (PET) estimates how much water the atmosphere demands — how much would evaporate if soil were always wet. Thornthwaite is the simplest method, needing only temperature and latitude.
 
@@ -426,7 +430,7 @@ Latitude (to calculate day length)
 That’s why it’s popular when only temperature data are available.
 
 
-How PET calculation works within Thornthwaite method
+**How PET calculation works within Thornthwaite method**
 
 
 Step 1: Compute Monthly Heat Index
@@ -436,7 +440,7 @@ $$
 i = \left(\frac{T}{5}\right)^{1.514}
 $$
 Where:\
-$T$ = = mean monthly temperature (°C)
+$T$ = mean monthly temperature (°C)\
 If $T$ < 0, then PET = 0 for that month.
 
 Step 2: Annual Heat Index
@@ -489,7 +493,7 @@ $$
 
 **Step 3**
 
-Compute water balance = Precip − PET New step vs SPI
+Compute water balance = Precip − PET (New step vs SPI)
 
 This is the core insight of SPEI — drought is not just about low rain, it is about rain relative to atmospheric demand.
 
