@@ -1,0 +1,805 @@
+---
+title: "Project - Drought Matrices"
+author: "Potential Indices for GWSC's Use"
+
+format:
+  pdf:
+    pdf-engine: xelatex
+    documentclass: article
+    number-sections: true
+
+editor: visual
+---
+
+# Standardized Precipitation Index (SPI)
+
+- Widely use drought index
+
+## How to calculate 
+
+**Step 1**
+
+
+Collect raw monthly precipitation (Input)
+
+You need a long time series of monthly precipitation for each pixel or station. A minimum of 30 years is recommended so the distribution is well estimated.
+
+one value per pixel per month. It needs a continuous time series ordered by time.
+
+**Step 2**
+
+Rolling sum at chosen timescale (Aggregation)
+
+
+Before any statistics, precipitation is summed over the chosen window. This is what the "3", "6", "12" in SPI-3 / SPI-6 / SPI-12 means.
+
+SPI-3 for March = precip(Jan) + precip(Feb) + precip(Mar)
+
+
+Why different scales?\
+SPI-3 captures short-term agricultural drought. SPI-6 reflects medium-term hydrological conditions. SPI-12 tracks long-term groundwater and reservoir trends.
+
+**Step 3**
+
+Fit a Gamma distribution — per calendar month (Statistics)
+
+
+This is the core statistical step. A Gamma distribution is fitted separately for each calendar month at each pixel using Maximum Likelihood Estimation (MLE). So January gets its own fit, February its own, etc. — because precipitation is seasonal.
+
+
+Gamma ($\alpha, \beta$) where ; $\alpha$ = shape  ·   $\beta$ = scale
+
+
+Zero precipitation problem: Gamma cannot handle zeros (common in dry seasons). The package uses a mixed distribution:
+
+
+$P(X ≤ x) = q + (1 − q) × Gamma_CDF(x)$
+
+
+where q = probability of a zero-precipitation month
+
+
+**Step 4**
+
+Convert to cumulative probability (Transform)
+
+Each observed precipitation value is converted to a probability — what fraction of historical months were drier than this month
+
+
+The estimated gamma distribution gives you the probability of getting precipitation x
+
+
+For example What is the probability of getting equal or lower 130mm for a given month (i.e. March)
+
+And let's say that we have estimated $\alpha$ and $\beta$ are 11 and 13 respectively 
+
+Gamma probability density function is:\
+
+$$
+f(x) = \frac{1}{\beta^\alpha \Gamma(\alpha)} x^{\alpha - 1} e^{-x/\beta}
+$$
+
+$$
+P(X ≤ 130) = ∫₀¹³⁰ f(x) dx = 0.23
+$$
+
+What 0.23 means intuitively - (Ways to interpret)\
+
+23% of historical months had precipitation ≤ 130 mm\
+77% of historical months were wetter than this\
+This month is in the lower 23rd percentile — drier than normal\
+
+
+
+
+**Step 4**
+
+Convert to cumulative probability (Transform) - Standard Normal
+
+Why we need to do this?\
+
+Gamma distribution is skewed, bounded at zero, and often heavy tailed
+
+But to compare \
+- wet/dry conditions across;
+- different climate/ different seasons/ different time scales\
+- we need standardized index
+
+To do that it define standard normal distribution (mean = 0, sd = 1)
+
+For example consider two locations:\
+Location A (wet climate)\
+Gamma is wide and less skewed.\
+Location B (arid climate)\
+Gamma is extremely skewed.
+
+A probability of 0.23 in each place does not translate into the same distance from the mean in rainfall space fo A and B
+
+So comparisons become difficult.
+
+**Step 5**
+
+Transform to Standard Normal → SPI value Output
+
+The cumulative probability is passed through the inverse normal function to map it onto a standard normal distribution (mean = 0, sd = 1).
+
+$$
+SPI = Φ⁻¹(p) = qnorm(p)
+$$
+So what SPI = −0.5 means "0.5 standard deviations below the long-term average" and why values are comparable across regions and seasons.
+
+For instance SPI = +0.5 means:
+
+This month's accumulated precipitation was 0.5 standard deviations above the long-term average — slightly wetter than normal but nothing unusual.
+
+## Mock example run for Argentina 2000:2020 using ERA5 data
+
+\newpage
+
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+#| error: false
+
+spi_results <- readRDS("./Data/spi_results.rds")
+
+```
+
+
+
+
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+#| error: false
+
+library(dplyr)
+library(ggplot2)
+library(dplyr)
+library(ggplot2)
+
+# ── Build country average ONCE with all three indices ─────────────────────────
+country_avg <- spi_results |>
+  group_by(year, month) |>
+  summarise(
+    spi3  = mean(spi3,  na.rm = TRUE),
+    spi6  = mean(spi6,  na.rm = TRUE),
+    spi12 = mean(spi12, na.rm = TRUE),
+    .groups = "drop"
+  ) |>
+  arrange(year, month) |>
+  mutate(
+    month   = as.integer(month),
+    year    = as.integer(year),
+    x_idx   = row_number(),
+    x_label = as.character(month)
+  )
+
+jan_rows    <- filter(country_avg, month == 1)
+year_breaks <- jan_rows$x_idx + 5.5
+year_labels <- as.character(jan_rows$year)
+
+# ── Reusable plot function ────────────────────────────────────────────────────
+
+
+plot_spi <- function(data, col, title) {
+  ggplot(data, aes(x = x_idx, y = .data[[col]])) +
+
+    geom_col(aes(fill = .data[[col]] >= 0), width = 0.8, show.legend = TRUE) +
+
+    geom_hline(yintercept = c(-2, -1, 1, 2),
+               linetype = "dashed", colour = "grey50", linewidth = 0.3) +
+    geom_hline(yintercept = 0, colour = "white", linewidth = 0.6) +
+
+    geom_vline(
+      data = jan_rows,
+      aes(xintercept = x_idx - 0.5),
+      colour = "grey60", linewidth = 0.4, linetype = "dotted"
+    ) +
+
+    scale_fill_manual(
+      values = c("TRUE" = "#2196F3", "FALSE" = "#FF5722"),
+      labels = c("TRUE" = "Above normal (≥ 0)", "FALSE" = "Below normal (< 0)")
+    ) +
+
+scale_x_continuous(
+  breaks = data$x_idx[data$month %in% c(1, 2, 4, 6, 8,10,12)],
+  labels = data$x_label[data$month %in% c(1,2,4,6,8,10,12)],
+  expand = c(0.01, 0.01),
+  sec.axis = sec_axis(
+    transform = ~.,
+    breaks = year_breaks,
+    labels = year_labels
+  )
+)+
+
+    labs(
+      title    = paste0("Argentina-average ", title),
+      subtitle = "Mean across all pixels · dashed lines at ±1 and ±2",
+      x = NULL, y = title, fill = NULL
+    ) +
+
+    theme_dark() +
+    theme(
+      axis.text.x.bottom = element_text(size = 5, angle = 90, vjust = 0.5, hjust = 1, colour = "black", face = "bold"),
+      axis.text.x.top    = element_text(size = 12, angle = 0, colour = "#aaaaaa", face = "bold"),
+      axis.ticks.x.top   = element_line(colour = "grey40"),
+      legend.position    = "bottom",
+      legend.key.size    = unit(0.4, "cm"),
+      panel.grid.major.x = element_blank()
+    )
+}
+
+# ── Generate all three plots ──────────────────────────────────────────────────
+p3  <- plot_spi(country_avg, col = "spi3",  title = "SPI-3")
+p6  <- plot_spi(country_avg, col = "spi6",  title = "SPI-6")
+p12 <- plot_spi(country_avg, col = "spi12", title = "SPI-12")
+
+
+
+# ── Or print all three stacked ────────────────────────────────────────────────
+#library(patchwork)
+#p3 / p6 / p12
+```
+
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+#| error: false
+#| fig-width: 18
+#| fig-height: 6
+#| dpi: 500
+#| out-width: "100%"    # ← forces the image to fill the full page width
+p3
+```
+
+
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+#| error: false
+#| fig-width: 18
+#| fig-height: 6
+#| dpi: 500
+#| out-width: "100%"    # ← forces the image to fill the full page width
+p6
+```
+
+
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+#| error: false
+#| fig-width: 18
+#| fig-height: 6
+#| dpi: 500
+#| out-width: "100%"    # ← forces the image to fill the full page width
+p12
+```
+
+
+
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+#| error: false
+
+library(tidyr)
+
+country_avg <- spi_results |>
+  group_by(year, month) |>
+  summarise(
+    spi3  = mean(spi3,  na.rm = TRUE),
+    spi6  = mean(spi6,  na.rm = TRUE),
+    spi12 = mean(spi12, na.rm = TRUE),
+    .groups = "drop"
+  ) |>
+  arrange(year, month) |>
+  mutate(
+    month   = as.integer(month),
+    year    = as.integer(year),
+    x_idx   = row_number(),
+    x_label = as.character(month),
+    date    = as.Date(paste(year, month, "01"), "%Y %m %d")  # ← add this
+  )
+
+country_avg |>
+  pivot_longer(c(spi3, spi6, spi12), names_to = "index", values_to = "value") |>
+  ggplot(aes(x = date, y = value, colour = index)) +
+  geom_line(linewidth = 0.8) +
+  geom_hline(yintercept = c(-1, 1), linetype = "dashed",
+             colour = "grey50", linewidth = 0.01) +
+  scale_colour_manual(values = c(spi3  = "#81D4FA",
+                                 spi6  = "#FFD600",
+                                 spi12 = "#FF5722")) +
+  labs(title = "Argentina-average SPI — all timescales",
+       x = NULL, y = "SPI", colour = NULL) +
+  theme_dark() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+```
+
+## Disussion Points
+
+**What decisions we have to make to interpret an event as drought?**
+
+
+SPI was developed by McKee, Doesken & Kleist (1993). They looked at the standard normal distribution and chose thresholds that corresponded to meaningful return periods — how rarely an event occurs historically.
+
+
+Their original classification published in that 1993 paper:
+
+**SPI Classification Table - Original publication**
+
+| SPI Value Range      | Category            | Their Reasoning                     |
+|----------------------|--------------------|--------------------------------------|
+| ≥ +2.0               | Extremely wet       | Occurs ~2.3% of the time             |
+| +1.5 to +1.99        | Very wet            | Occurs ~4.4% of the time             |
+| +1.0 to +1.49        | Moderately wet      | Occurs ~9.2% of the time             |
+| −0.99 to +0.99       | Near normal         | The middle 68%                       |
+| −1.0 to −1.49        | Moderately dry      | Occurs ~9.2% of the time             |
+| −1.5 to −1.99        | Severely dry        | Occurs ~4.4% of the time             |
+| ≤ −2.0               | Extremely dry       | Occurs ~2.3% of the time             |
+
+They essentially mirrored the normal distribution's natural breakpoints — the ±1, ±1.5, ±2 boundaries are not arbitrary, they correspond to well-known probability thresholds.
+
+Are they universal? No — and this is important
+
+**Drought Thresholds by Organisation**
+
+| Organisation                         | Drought Starts At |
+|--------------------------------------|-------------------|
+| McKee et al. (1993, original SPI)    | −1.0              |
+| US Drought Monitor                   | −0.5 (mild) / −1.0 (moderate) |
+| WMO (World Meteorological Organization) | −1.0          |
+| Some agricultural studies            | −0.8              |
+
+
+
+The WMO standardized on −1.0 in their 2012 guidelines and recommended all countries use SPI with that threshold for comparability — so −1.0 is now the most internationally accepted convention. 
+
+\begingroup
+\color{red}
+
+Is GWSC align with this? or we define something own. If we do something our own we can rely on the same logic, we can look historic event of a given county and define those thresholds?
+
+
+So the next Big 3 Q's we want to answer
+
+Q1: Frequency: How often a drought event happen?\
+
+To answer this, we first need to clearly define what constitutes a drought. For example, is a drought defined as SPI ≤ −1 sustained over three consecutive months? This theoretical definition needs to be confirmed first. Once it is agreed upon by the team, the data scientists can consistently apply that definition and calculate the frequency based on the derived SPI values.
+
+
+Q2: Duration: How long\
+
+Need broader discussion on how long dry event we confider as a drought?. Is it something like period that stay SPI value below -1 for consecutive three month?
+
+
+Q3: What magnitude\
+
+Is SPI scale along tell a good fit or we need something else?
+
+
+\endgroup
+
+
+ 
+ \newpage
+ 
+# Standardized Precipitation Evapotranspiration Index (SPEI) -  Thornthwaite PET method
+
+## How to calculate 
+
+**Step 1**
+
+Collect raw monthly precipitation + temperature + lattitude (Input)
+
+SPEI needs three inputs per pixel per month — this is the key difference from SPI which only needs precipitation. A minimum of 30 years is recommended.
+
+SPI needs : monthly_precip only
+
+SPEI needs : monthly_precip + mean_temp_monthly + latitude (y)
+
+
+**Step 2**
+
+Compute PET via Thornthwaite - following I add notes on how to calculate the PET from this method and, it may be ad-hoc this time but it give some idea how that number came from and if if needs to compare the process with more advance PET calculation such as Penmanth.
+
+Potential Evapotranspiration (PET) estimates how much water the atmosphere demands — how much would evaporate if soil were always wet. Thornthwaite is the simplest method, needing only temperature and latitude.
+
+The Thornthwaite method (1948) is the simplest PET method.
+
+It only requires:
+
+Mean monthly temperature
+
+Latitude (to calculate day length)
+
+That’s why it’s popular when only temperature data are available.
+
+
+How PET calculation works within Thornthwaite method
+
+
+Step 1: Compute Monthly Heat Index
+
+
+$$
+i = \left(\frac{T}{5}\right)^{1.514}
+$$
+Where:\
+$T$ = = mean monthly temperature (°C)
+If $T$ < 0, then PET = 0 for that month.
+
+Step 2: Annual Heat Index
+
+$$
+I = \sum_{m=1}^{12} i_m
+$$
+Step 3: Compute Exponent a
+
+$$
+a = 6.75 \times 10^{-7} I^3 - 7.71 \times 10^{-5} I^2 + 1.792 \times 10^{-2} I + 0.49239
+$$
+
+
+Step 4: Monthly PET
+
+
+$$
+\text{PET} = 16 \left( \frac{10 T}{I} \right)^a
+$$
+
+Where:
+
+$T$ = mean monthly temperature (°C)\
+$I$ = annual heat index (sum of monthly i)
+$a$ = empirical exponent computed from I
+
+
+Then adjust for:
+
+Day length (latitude-based correction)
+
+Number of days in the month
+
+Final corrected PET:
+
+$$
+\text{PET}_m = 16 \left( \frac{10 T_m}{I} \right)^a \times \frac{L_m}{12} \times \frac{N_m}{30}
+$$
+
+$$
+\begin{aligned}
+T_m & = \text{mean monthly temperature (°C)} \\
+I & = \sum_{m=1}^{12} i_m && \text{annual heat index} \\
+a & = 6.75 \times 10^{-7} I^3 - 7.71 \times 10^{-5} I^2 + 1.792 \times 10^{-2} I + 0.49239 && \text{Thornthwaite exponent} \\
+L_m & = \text{average daylight hours in month } m \\
+N_m & = \text{number of days in month } m
+\end{aligned}
+$$
+
+**Step 3**
+
+Compute water balance = Precip − PET New step vs SPI
+
+This is the core insight of SPEI — drought is not just about low rain, it is about rain relative to atmospheric demand.
+
++50 mm\
+80mm rain − 30mm PET\
+Surplus → wet\
+
+≈ 0 mm\
+60mm rain − 60mm PET\
+Balanced → normal\
+
+−80 mm\
+10mm rain − 90mm PET\
+Deficit → drought\
+
+
+Why this catches drought SPI misses: A hot summer with average rainfall but very high PET will give a negative water balance → SPEI flags drought. SPI sees normal precipitation and says nothing is wrong. Water balance can be negative — this is why SPEI needs a different distribution than SPI in the next step.
+
+**Step 4**
+
+Rolling sum at chosen timescale (Aggregation)
+
+
+Same as SPI — the water balance is accumulated over the chosen window.
+
+SPEI-3 for March = WB(Jan) + WB(Feb) + WB(Mar)
+
+**Step 5**
+
+Fit a Log-logistic distribution — per calendar month 
+
+
+Same concept as SPI's Gamma fitting — fitted separately per calendar month per pixel — but a different distribution is used
+
+
+SPEI uses Log-logistic:Works on any value including negatives. Required because water balance can be negative.
+
+
+Zero handling: Because water balance includes negative values, there is no need for the zero-inflation correction that SPI requires. The log-logistic distribution covers the full range naturally.
+
+**Step 6**
+
+Convert to probability → Standard Normal → SPEI value 
+
+Identical final steps to SPI — cumulative probability then inverse normal:
+
+
+$$
+p = F_{\text{LL}}(D)
+$$
+
+$$
+\text{SPEI} = \Phi^{-1}(p) = \text{qnorm}(p)
+$$
+
+
+## Mock example run for Argentina 2000:2020 using ERA5 data (SPEI)
+
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+#| error: false
+
+spei_results <- readRDS("./Data/spei_results.rds")
+
+```
+
+
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+#| error: false
+
+library(dplyr)
+library(ggplot2)
+library(dplyr)
+library(ggplot2)
+
+# ── Build country average ONCE with all three indices ─────────────────────────
+country_avg <- spei_results |>
+  group_by(year, month) |>
+  summarise(
+    spei3  = mean(spei3,  na.rm = TRUE),
+    spei6  = mean(spei6,  na.rm = TRUE),
+    spei12 = mean(spei12, na.rm = TRUE),
+    .groups = "drop"
+  ) |>
+  arrange(year, month) |>
+  mutate(
+    month   = as.integer(month),
+    year    = as.integer(year),
+    x_idx   = row_number(),
+    x_label = as.character(month)
+  )
+
+jan_rows    <- filter(country_avg, month == 1)
+year_breaks <- jan_rows$x_idx + 5.5
+year_labels <- as.character(jan_rows$year)
+
+# ── Reusable plot function ────────────────────────────────────────────────────
+
+
+plot_spei <- function(data, col, title) {
+  ggplot(data, aes(x = x_idx, y = .data[[col]])) +
+
+    geom_col(aes(fill = .data[[col]] >= 0), width = 0.8, show.legend = TRUE) +
+
+    geom_hline(yintercept = c(-2, -1, 1, 2),
+               linetype = "dashed", colour = "grey50", linewidth = 0.3) +
+    geom_hline(yintercept = 0, colour = "white", linewidth = 0.6) +
+
+    geom_vline(
+      data = jan_rows,
+      aes(xintercept = x_idx - 0.5),
+      colour = "grey60", linewidth = 0.4, linetype = "dotted"
+    ) +
+
+    scale_fill_manual(
+      values = c("TRUE" = "#2196F3", "FALSE" = "#FF5722"),
+      labels = c("TRUE" = "Above normal (≥ 0)", "FALSE" = "Below normal (< 0)")
+    ) +
+
+scale_x_continuous(
+  breaks = data$x_idx[data$month %in% c(1, 2, 4, 6, 8,10,12)],
+  labels = data$x_label[data$month %in% c(1,2,4,6,8,10,12)],
+  expand = c(0.01, 0.01),
+  sec.axis = sec_axis(
+    transform = ~.,
+    breaks = year_breaks,
+    labels = year_labels
+  )
+)+
+
+    labs(
+      title    = paste0("Argentina-average ", title),
+      subtitle = "Mean across all pixels · dashed lines at ±1 and ±2",
+      x = NULL, y = title, fill = NULL
+    ) +
+
+    theme_dark() +
+    theme(
+      axis.text.x.bottom = element_text(size = 5, angle = 90, vjust = 0.5, hjust = 1, colour = "black", face = "bold"),
+      axis.text.x.top    = element_text(size = 12, angle = 0, colour = "#aaaaaa", face = "bold"),
+      axis.ticks.x.top   = element_line(colour = "grey40"),
+      legend.position    = "bottom",
+      legend.key.size    = unit(0.4, "cm"),
+      panel.grid.major.x = element_blank()
+    )
+}
+
+# ── Generate all three plots ──────────────────────────────────────────────────
+p3  <- plot_spei(country_avg, col = "spei3",  title = "SPEI-3")
+p6  <- plot_spei(country_avg, col = "spei6",  title = "SPEI-6")
+p12 <- plot_spei(country_avg, col = "spei12", title = "SPEI-12")
+
+
+
+# ── Or print all three stacked ────────────────────────────────────────────────
+#library(patchwork)
+#p3 / p6 / p12
+```
+
+
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+#| error: false
+#| fig-width: 18
+#| fig-height: 6
+#| dpi: 500
+#| out-width: "100%"    # ← forces the image to fill the full page width
+p3
+```
+
+
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+#| error: false
+#| fig-width: 18
+#| fig-height: 6
+#| dpi: 500
+#| out-width: "100%"    # ← forces the image to fill the full page width
+p6
+```
+
+
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+#| error: false
+#| fig-width: 18
+#| fig-height: 6
+#| dpi: 500
+#| out-width: "100%"    # ← forces the image to fill the full page width
+p12
+```
+
+
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+#| error: false
+
+library(tidyr)
+
+country_avg <- spei_results |>
+  group_by(year, month) |>
+  summarise(
+    spei3  = mean(spei3,  na.rm = TRUE),
+    spei6  = mean(spei6,  na.rm = TRUE),
+    spei12 = mean(spei12, na.rm = TRUE),
+    .groups = "drop"
+  ) |>
+  arrange(year, month) |>
+  mutate(
+    month   = as.integer(month),
+    year    = as.integer(year),
+    x_idx   = row_number(),
+    x_label = as.character(month),
+    date    = as.Date(paste(year, month, "01"), "%Y %m %d")  # ← add this
+  )
+
+country_avg |>
+  pivot_longer(c(spei3, spei6, spei12), names_to = "index", values_to = "value") |>
+  ggplot(aes(x = date, y = value, colour = index)) +
+  geom_line(linewidth = 0.8) +
+  geom_hline(yintercept = c(-1, 1), linetype = "dashed",
+             colour = "grey50", linewidth = 0.01) +
+  scale_colour_manual(values = c(spei3  = "#81D4FA",
+                                 spei6  = "#FFD600",
+                                 spei12 = "#FF5722")) +
+  labs(title = "Argentina-average SPEI — all timescales",
+       x = NULL, y = "SPEI", colour = NULL) +
+  theme_dark() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+```
+
+## Disussion Points
+
+\begingroup
+\color{red}
+
+Q1. There are few other ways of calculating PET
+
+
+**- Hargreaves**
+
+- Needs: Min, max, and mean monthly temperature + latitude\
+- Best for: When you have min/max temps but no radiation or wind data\
+- Why better than Thornthwaite: Uses temperature range (Tmax − Tmin) as a proxy for solar radiation — a hot day with a big temperature swing means more radiation and more evaporation\
+- ERA5 relevance: ERA5 provides Tmin and Tmax so this is achievable with your data\
+
+**-Penman-Monteith**
+
+- Needs: Temperature, wind speed, solar radiation, humidity, elevation < lot of climate data - may be more accurate\
+- Best for: Most physically accurate — the FAO standard method\
+- Why best: Uses the actual physical drivers of evaporation — energy (radiation), aerodynamic (wind), and humidity deficit\
+- ERA5 relevance: ERA5 provides all of these variables so full Penman-Monteith is possible — but requires more data extraction work from your Databricks table- I think we need to discuss this with S2S gruop ho CMIP data perform here.
+
+**-Priestley-Taylor**
+
+- Needs: Temperature + solar radiation (no wind or humidity needed)\
+- Best for: Middle ground between Hargreaves and full Penman-Monteith\
+- Why useful: More physically grounded than Thornthwaite but simpler than full Penman-Monteith\
+
+
+
+\endgroup
+
+I will add more indices here, meanwhile let's think about the other objectives we have to deal with.
+
+
+# With selected matrices what each tell about a given case?
+
+Here I am thinking of overlapping each indices to understand 
+
+
+Q. Each telling a different story?if so how much different?\
+Q. Which one is the most understandable for the public?\
+
+
+Output somethinglike a place X has drought 1 per decade with function A (matrix A)
+
+# What is the truth?
+
+Evaluation criteria of each indices - Think about now we have a menue of indices, now we want to asesss whih one tell the most acccutare story about drought?
+
+
+1. NDVI — vegetation response\
+
+NDVI from MODIS measures how green/stressed vegetation is. The logic is simple — if drought is real, plants should show stress 1–3 months later. Ife we correlate monthly NDVI anomalies against your SPI/SPEI values at matching pixels and months. The index with the highest correlation best predicts vegetation stress. Particularly useful in agricultural and grassland areas.
+
+
+
+2. Soil moisture — SMAP\
+NASA SMAP measures actual surface soil moisture from satellite microwave sensors. This is arguably the most direct validation — if SPI/SPEI says drought, soil should actually be dry. Ifw we correlate monthly soil moisture anomalies against your indices. SPEI tends to outperform SPI here in warm months because PET-driven soil drying is captured.
+
+I will explore this dataset a little more, as it would be a good source for calculating the standardized soil moisture index and other drought matrices we can derive.
+
+
+3. Crop yield anomalies\
+If drought indices are meaningful for agriculture, they should predict yield anomalies. If we correlate province-level annual yield anomalies (soy, maize, wheat) against spatially averaged SPI/SPEI for the growing season. SPI-3 during critical growth months typically matters most.
+
+

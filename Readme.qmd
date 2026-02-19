@@ -1,6 +1,6 @@
 ---
 title: "Drought Matrices"
-author: "TJ"
+author: "TJ’s Notes to Discuss with Caily"
 format:
   pdf:
     pdf-engine: pdflatex
@@ -8,159 +8,833 @@ format:
 editor: visual
 ---
 
-
-
-
-
 ## Why GWSC need drought matrices
-
 
 **GWSC typically encounters questions such as:**
 
-1. How is precipitation during traditionally wet years expected to change in the future, and what are the potential impacts?
+1.  How is precipitation during traditionally wet years expected to change in the future, and what are the potential impacts?
 
-2. What do recent rainfall declines imply for agricultural vulnerability and resilience?
-
+2.  What do recent rainfall declines imply for agricultural vulnerability and resilience?
 
 **To answer them, we typically use scientifically grounded and technical metrics such as:**
 
-- Consecutive Dry Days (CDD)
-- Consecutive Dry Months
+-   Consecutive Dry Days (CDD)
+-   Consecutive Dry Months
 
-
-::: {.columns}
-
+::::: columns
 ::: {.column width="50%"}
-![](Figures/SS1.png){width=70%}
+![](Figures/SS1.png){width="70%"}
 :::
 
 ::: {.column width="50%"}
-![](Figures/SS2.png){width=70%}
+![](Figures/SS2.png){width="70%"}
 :::
-
-:::
+:::::
 
 **We are looking for drought metrics to answer**
 
-- Frequency of drought events: How often droughts occur relative to a baseline period
-- Duration of drought: How long a drought persists
-- Intensity of drought: The magnitude or severity of drought conditions
-
+-   Frequency of drought events: How often droughts occur relative to a baseline period
+-   Duration of drought: How long a drought persists
+-   Intensity of drought: The magnitude or severity of drought conditions
 
 **Why existing drought metrics are not aligning with GWSC's needs?**
 
-
-
 **Four interconnected types**
 
-- Meteorological - prolonged deficits in precipitation\
-          ↓
-- Hydrological - reduced surface and groundwater availability\
-          ↓
-- Agricultural - soil moisture deficits affecting crop growth\
-          ↓
-- Socioeconomic - broader disruptions in water‐dependent social and economic systems
-
-
+-   Meteorological - prolonged deficits in precipitation\
+    ↓
+-   Hydrological - reduced surface and groundwater availability\
+    ↓
+-   Agricultural - soil moisture deficits affecting crop growth\
+    ↓
+-   Socioeconomic - broader disruptions in water‐dependent social and economic systems
 
 **Existing meteorological drought indices**
 
+![](Figures/SS3.png){width="100%"}
 
-![](Figures/SS3.png){width=100%}
+Meteorological definitions on dry periods are\
 
+1)  consecutive days with no precipitation\
+2)  consecutive days with little precipitation\
+3)  little precipitation during a specific period of time
+
+Terms like “consecutive days,” “specific period,” “no precipitation,” and “little precipitation” are often based on subjective or empirical choices rather than standardized criteria. For example:
+
+-   Little precipitation is sometimes defined as \<2 mm/day or \<5 mm/day.
+
+-   No precipitation may mean less than a trace or \<2 mm/day, depending on the source.
+
+-   Consecutive days can range from \>15 days to \>25 days in different studies.
+
+-   The specific period over which precipitation is measured can be a month, a season, or other durations
+
+**Shortcomings of current indexes**
+
+**Defining the period of water deficit:**
+
+Drought is defined not just by a temporary water shortage but by consecutive periods of water deficiency relative to the climatological mean. Most existing drought indices, however, focus only on water deficits over a predefined duration and lack an objective method for determining the appropriate length of the deficit period.
+
+**Time unit of assessment:**
+
+Most current drought indices use monthly or longer time periods, with only a few using weekly units; none use daily units. However, daily assessment is important because short periods of heavy rainfall can quickly restore normal conditions, and dry spells shorter than a month (e.g., 15 days) can still cause significant impacts. Frequent reevaluation of drought intensity is crucial, especially in regions where precipitation is the main water source.
+
+**Storing term of water resources:**
+
+Drought impacts originate from deficiencies in soil moisture first, then propagate to other stored water resources such as reservoirs. Soil dryness reflects recent precipitation deficits, while longer-term water shortages are influenced by extended precipitation patterns. Most current drought indices do not distinguish these two causes, except for indices like PDSI and SWSI, which separately account for short-term soil moisture and long-term water storage deficits.
+
+**Road map**
+
+1.  What options we have ?\
+    a). What matrices we can consider?\
+    b). What are their formulas?\
+    c). What data we need?\
+    d). Is there decisions on thresholds for each if so how to define them\
+2.  With selected matrices what each tell about a given case?\
+    a). Each telling a different story?if so how much different?\
+    b). Which one is the most understandable for the public?\
+3.  What is the truth?\
+    4). Evaluation criteria\
+    a). How different is too different?\
+    b). space, time, total\
+    c). frequency and duration\
+    d). place X has drought 1 per decade with function A (matrix A)\
+
+**Potential Drought indices**
+
+1). Integrated Drought Severity Index (IDSI)
+
+The Integrated Drought Severity Index (IDSI) is a comprehensive drought monitoring tool that combines multiple drought indicators into a single value.
+
+a)  Formula;
+
+$$
+IDSI = 0.25(SPI) + 0.20(SPEI) + 0.15(PDSI) + 0.20(SSI) + 0.10(VHI) + 0.05(SRI) + 0.05(GWI)
+$$ Where; SPI (Standardized Precipitation Index)\
+SPEI (Standardized Precipitation Evapotranspiration Index)\
+PDSI (Palmer Drought Severity Index)\
+SSI (Standardized Soil Moisture Index)\
+VHI (Vegetation Health Index)\
+SRI (Standardized Runoff Index)\
+GWI (Groundwater Index)
+
+It needs data on factors like Soil moisture, NDVI (which is hard to have for future). So this is not a potential index for GWSC's need
+
+\begin{tabular}{|p{2cm}|p{3cm}|p{4cm}|p{2cm}| p{2cm}|}
+\hline
+Index & Formula & Data Needed & Decisions on Thresholds  & Potential Candidate \\ 
+\hline
+CPD & B & C & D & D \\
+\hline
+E & F & G & H & D\\
+\hline
+\end{tabular}
+
+So Let's step back from SPI and think bit more structurally - before bringing that probability event
+
+**1. Cumulative Precipitation Deficit (CPD)**
+
+\begingroup
+\color{red}
+
+These type of index would loose the standardization?
+
+Q1. To which extent GWSC need Standardized matrics or not
+
+Standardization converts absolute precipitation values into relative severity scores, making droughts comparable across different locations, seasons, time periods, and climate models—regardless of whether a region is naturally wet or dry.
+
+\endgroup
+
+**Step 1: Define "normal" precipitation for each month (e.g., 30-year average)**
+
+\begingroup
+\color{red}
+
+It appears that GWSC calculates the historical normal as a simple mean between 2000-2020, which represents the 2010 mean, and also calculates the historic normal as the mean between 1975-1995, which represents the 1985 mean. This annual mean calculation of normals will likely not work well for drought analysis, as we examine precipitation at a monthly scale (daily is also possible and open to discussion).
+
+Q2: How should we calculate normals—does a simple average work, or do we need to depend on a probability based apprpach?
+
+Probability-based normal
+
+Could use median instead of mean (50th percentile)\
+Could use different thresholds (e.g., 25th percentile = moderately dry conditions)\
+More robust to extreme values\
+
+Organize Historical Data by Month, Calculate Percentiles for Each Month
+
+Why median?
+
+More robust than mean (not affected by extreme outliers)\
+Represents typical conditions\
+Better for skewed precipitation data\
+
+\endgroup
+
+## Step 2: Calculate monthly deficit/surplus:
+
+Deficit(month) = Normal - Actual (if Actual \< Normal)\
+Surplus(month) = Actual - Normal (if Actual \> Normal)
+
+Step 3: Accumulate the deficit:
+
+Cumulative Deficit = Sum of all monthly deficits
+
+Step 4: Drought ends when cumulative surplus equals cumulative deficit
+
+| Month | Normal (mm) | Actual (mm) | Defi (mm) | Cumulative Defi (mm) | Interpretation |
+|----|----|----|----|----|----|
+| Jan | 50 | 30 | -20 | -20 | Drought starts |
+| Feb | 45 | 25 | -20 | -40 | Getting worse |
+| Mar | 60 | 35 | -25 | -65 | Still worsening |
+| Apr | 55 | 70 | +15 | -50 | Wet month, but not enough |
+| May | 50 | 80 | +30 | -20 | Recovering |
+| Jun | 60 | 85 | +25 | +5 | **Drought over (deficit repaid)** |
+
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+#| error: false
+
+
+# ============================================================================
+# Cumulative Precipitation Deficit (CPD) Calculation
+# ============================================================================
+
+# Load required libraries
+library(ggplot2)
+library(dplyr)
+
+# Set seed for reproducibility
+set.seed(123)
+
+# ============================================================================
+# STEP 1: Simulate Precipitation Data
+# ============================================================================
+
+# Create 10 years of monthly precipitation data (120 months)
+n_years <- 10
+n_months <- n_years * 12
+
+# Simulate realistic precipitation with some drought periods
+# Using gamma distribution (realistic for precipitation)
+simulate_precip <- function(n_months) {
+  precip <- numeric(n_months)
+  
+  for (i in 1:n_months) {
+    # Normal conditions most of the time
+    if (i >= 25 && i <= 36) {
+      # Drought period (months 25-36, year 3)
+      precip[i] <- rgamma(1, shape = 1.5, scale = 15)  # Lower precipitation
+    } else if (i >= 70 && i <= 78) {
+      # Another drought (months 70-78, year 6-7)
+      precip[i] <- rgamma(1, shape = 1.8, scale = 12)
+    } else if (i >= 50 && i <= 55) {
+      # Wet period (recovery)
+      precip[i] <- rgamma(1, shape = 4, scale = 25)
+    } else {
+      # Normal conditions
+      precip[i] <- rgamma(1, shape = 2.5, scale = 20)
+    }
+  }
+  
+  return(precip)
+}
+
+actual_precip <- simulate_precip(n_months)
+
+# ============================================================================
+# STEP 2: Calculate Normal/Historical Average
+# ============================================================================
+
+# Method 2: Monthly normals (more realistic - each month has different normal)
+# Calculate normal for each month based on climatology
+calculate_monthly_normals <- function(precip, n_years) {
+  normals <- numeric(12)
+  
+  for (month in 1:12) {
+    # Get all January values, all February values, etc.
+    month_indices <- seq(month, length(precip), by = 12)
+    normals[month] <- mean(precip[month_indices])
+  }
+  
+  # Repeat for all months in the series
+  normal_series <- rep(normals, n_years)
+  return(normal_series)
+}
+
+normal_precip <- calculate_monthly_normals(actual_precip, n_years)
+
+# ============================================================================
+# STEP 3: Calculate Cumulative Precipitation Deficit (CPD)
+# ============================================================================
+
+calculate_cpd <- function(actual, normal) {
+  n <- length(actual)
+  
+  # Calculate monthly deficit or surplus
+  monthly_anomaly <- actual - normal
+  
+  # Separate into deficits (negative) and surplus (positive)
+  deficit <- ifelse(monthly_anomaly < 0, monthly_anomaly, 0)
+  surplus <- ifelse(monthly_anomaly > 0, monthly_anomaly, 0)
+  
+  # Calculate cumulative deficit
+  # This accumulates deficits and recovers with surplus
+  cumulative_deficit <- numeric(n)
+  cumulative_deficit[1] <- monthly_anomaly[1]
+  
+  for (i in 2:n) {
+    # Add current month's anomaly to previous cumulative
+    cumulative_deficit[i] <- cumulative_deficit[i-1] + monthly_anomaly[i]
+  }
+  
+  # Determine drought status
+  in_drought <- cumulative_deficit < 0
+  
+  # Calculate drought severity (as percentage of normal)
+  deficit_percent <- (cumulative_deficit / normal) * 100
+  
+  # Create results dataframe
+  results <- data.frame(
+    month = 1:n,
+    year = rep(1:n_years, each = 12),
+    month_of_year = rep(1:12, n_years),
+    actual = actual,
+    normal = normal,
+    monthly_anomaly = monthly_anomaly,
+    deficit = deficit,
+    surplus = surplus,
+    cumulative_deficit = cumulative_deficit,
+    in_drought = in_drought,
+    deficit_percent = deficit_percent
+  )
+  
+  return(results)
+}
+
+# Calculate CPD
+cpd_results <- calculate_cpd(actual_precip, normal_precip)
+
+# ============================================================================
+# STEP 4: Identify Drought Events (FIXED - Returns Data Frame)
+# ============================================================================
+
+identify_drought_events_detailed <- function(cpd_data) {
+  events <- data.frame(
+    event_id = integer(),
+    start_month = integer(),
+    end_month = integer(),
+    duration = integer(),
+    max_deficit = numeric(),
+    total_deficit = numeric()
+  )
+  
+  in_drought <- FALSE
+  start_month <- NA
+  event_counter <- 0
+  
+  for (i in 1:nrow(cpd_data)) {
+    current_in_drought <- cpd_data$in_drought[i]
+    
+    # Drought starts (transition from normal to drought)
+    if (!in_drought && current_in_drought) {
+      in_drought <- TRUE
+      start_month <- i
+      event_counter <- event_counter + 1
+    }
+    
+    # Drought ends (transition from drought to normal)
+    if (in_drought && !current_in_drought) {
+      end_month <- i - 1
+      
+      # Extract drought period data
+      drought_period <- cpd_data[start_month:end_month, ]
+      
+      # Record event
+      events <- rbind(events, data.frame(
+        event_id = event_counter,
+        start_month = start_month,
+        end_month = end_month,
+        duration = end_month - start_month + 1,
+        max_deficit = min(drought_period$cumulative_deficit),
+        total_deficit = sum(drought_period$deficit)
+      ))
+      
+      in_drought <- FALSE
+    }
+  }
+  
+  # Handle drought extending to end of record
+  if (in_drought) {
+    drought_period <- cpd_data[start_month:nrow(cpd_data), ]
+    events <- rbind(events, data.frame(
+      event_id = event_counter,
+      start_month = start_month,
+      end_month = nrow(cpd_data),
+      duration = nrow(cpd_data) - start_month + 1,
+      max_deficit = min(drought_period$cumulative_deficit),
+      total_deficit = sum(drought_period$deficit)
+    ))
+  }
+  
+  return(events)
+}
+
+# Identify drought events (NOW returns a data frame)
+drought_events <- identify_drought_events_detailed(cpd_results)
+
+# Print drought events summary
+cat("\n=== DROUGHT EVENTS DETECTED ===\n\n")
+if (nrow(drought_events) > 0) {
+  print(drought_events)
+} else {
+  cat("No drought events detected.\n")
+}
+
+# ============================================================================
+# PLOT: Monthly Anomaly with Drought Event Indicators
+# ============================================================================
+
+p4_minimal <- ggplot(cpd_results, aes(x = month, y = monthly_anomaly)) +
+  
+  # Original bars
+  geom_bar(stat = "identity", 
+           aes(fill = monthly_anomaly < 0)) +
+  
+  # Add colored boxes at bottom for drought events
+  {
+    if (nrow(drought_events) > 0) {
+      geom_rect(data = drought_events,
+                aes(xmin = start_month - 0.5, xmax = end_month + 0.5,
+                    ymin = min(cpd_results$monthly_anomaly) - 10,
+                    ymax = min(cpd_results$monthly_anomaly) - 5),
+                fill = "darkred", color = "black", linewidth = 0.5,
+                inherit.aes = FALSE)
+    }
+  } +
+  
+  # Add event text in boxes
+  {
+    if (nrow(drought_events) > 0) {
+      geom_text(data = drought_events,
+                aes(x = (start_month + end_month) / 2,
+                    y = min(cpd_results$monthly_anomaly) - 7.5,
+                    label = paste0("Event ", event_id, ": ", 
+                                   start_month, "-", end_month,
+                                   " (", duration, "mo)")),
+                size = 2.5, fontface = "bold", color = "white",
+                inherit.aes = FALSE)
+    }
+  } +
+  
+  # Original styling
+  scale_fill_manual(values = c("TRUE" = "red", "FALSE" = "blue"),
+                    labels = c("Surplus", "Deficit")) +
+  geom_hline(yintercept = 0, color = "black", linewidth = 1) +
+  
+  labs(title = "Monthly Precipitation Anomaly",
+       subtitle = "Deviation from Normal (Drought events shown at bottom)",
+       x = "Month",
+       y = "Anomaly (mm)",
+       fill = "") +
+  
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+
+
+# ============================================================================
+# ALTERNATIVE: Vertical Labels Version
+# ============================================================================
+
+p4_vertical <- ggplot(cpd_results, aes(x = month, y = monthly_anomaly)) +
+  
+  # Original bars
+  geom_bar(stat = "identity", 
+           aes(fill = monthly_anomaly < 0)) +
+  
+  # Shaded rectangles for drought periods
+  {
+    if (nrow(drought_events) > 0) {
+      geom_rect(data = drought_events,
+                aes(xmin = start_month - 0.5, xmax = end_month + 0.5,
+                    ymin = -Inf, ymax = Inf),
+                fill = "red", alpha = 0.15, inherit.aes = FALSE)
+    }
+  } +
+  
+  # Drought START vertical lines
+  {
+    if (nrow(drought_events) > 0) {
+      geom_vline(data = drought_events,
+                 aes(xintercept = start_month),
+                 color = "darkgreen", linewidth = 1.2, 
+                 linetype = "dashed")
+    }
+  } +
+  
+  # Drought END vertical lines
+  {
+    if (nrow(drought_events) > 0) {
+      geom_vline(data = drought_events,
+                 aes(xintercept = end_month),
+                 color = "darkblue", linewidth = 1.2, 
+                 linetype = "solid")
+    }
+  } +
+  
+  # Duration labels in middle
+  {
+    if (nrow(drought_events) > 0) {
+      geom_label(data = drought_events,
+                 aes(x = (start_month + end_month) / 2,
+                     y = 0,
+                     label = paste0("Event ", event_id, "\n", 
+                                    duration, " months")),
+                 size = 3, fontface = "bold", 
+                 color = "white", fill = "darkred", 
+                 alpha = 0.8)
+    }
+  } +
+  
+  # Original styling
+  scale_fill_manual(values = c("TRUE" = "red", "FALSE" = "blue"),
+                    labels = c("Surplus", "Deficit")) +
+  geom_hline(yintercept = 0, color = "black", linewidth = 1) +
+  
+  labs(title = "Monthly Precipitation Anomaly with Drought Event Tracking",
+       subtitle = "Green Dashed = Drought Start | Blue Solid = Drought End | Red Shading = Drought Period",
+       x = "Month",
+       y = "Anomaly (mm)",
+       fill = "") +
+  
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+
+
+
+```
+
+```{r}
+#| error: false
+p4_minimal
+
+```
+
+**Notes to later use**
+
+just considering precipitation in assessing future drought will lead to biased estimates of water security.
+
+Limitation with relying on Precipitation - flash drought - levatedtemperatures and heightened evaporative demand
+
+drought is not solely a result of natural variability but also a product of human decisions and actions - i.e. The increasing demand for water due to population growth, urbanization,and agricultural expansion has heightened the risk of water scarcity, even in regions not traditionally prone to drought
+
+More earliest definition of drought:
+
+-   21‐day period with total rainfall less than 30% of the regionalaverage, relying solely on precipitation thresholds to characterize prolonged drynes
+
+Traditional drought projections often rely on simple drought indices based on precipitation (like the Standardized Precipitation Index, SPI), which may not fully capture drought changes when evapotranspiration (driven by temperature and other climate factors) is important.
+
+SPI - along hard to use for predictiona as
+
+\begingroup
+\color{blue}
+
+The following section is a walkthrough of calculating the most common drought indices to provide exposure to how existing indices work. These recordings often serve as useful references for TJ.
+
+\endgroup
 
 **Most Common Indices**
 
-
-1. Standardized Precipitation Index (SPI)
+1.  Standardized Precipitation Index (SPI)
 
 Strengths:
 
-- Most widely used globally
-- Simple - only requires precipitation data
-- Can be calculated for multiple timescales (1, 3, 6, 12, 24 months)
-- Standardized, so comparable across regions and climates
+-   Most widely used globally
+-   Simple - only requires precipitation data
+-   Can be calculated for multiple timescales (1, 3, 6, 12, 24 months)
+-   Standardized, so comparable across regions and climates
 
 Formula: Normalizes precipitation using gamma distribution
 
+2.  Standardized Precipitation Evapotranspiration Index (SPEI) Strengths:
 
-2. Standardized Precipitation Evapotranspiration Index (SPEI)
-Strengths:
-
- - Includes temperature effects (evapotranspiration) - interesting but at GWSC's scale of assesmsnt how we canensure we caluclate accutate ET (adding another uncertanity)
- - More sensitive to climate change than SPI
- - Better for agricultural and hydrological applications
- - Same interpretation as SPI
+-   Includes temperature effects (evapotranspiration) - interesting but at GWSC's scale of assesmsnt how we canensure we caluclate accutate ET (adding another uncertanity)
+-   More sensitive to climate change than SPI
+-   Better for agricultural and hydrological applications
+-   Same interpretation as SPI
 
 Formula: Uses climatic water balance (P - PET)
 
+3.  Palmer Drought Severity Index (PDSI) Strengths:
 
-3. Palmer Drought Severity Index (PDSI)
-Strengths:
-
-Comprehensive - uses precipitation, temperature, soil moisture - again it would challenging or adding more uncertainty at the scale GWSC 
-Self-calibrating version (sc-PDSI) works across different climates
-
+Comprehensive - uses precipitation, temperature, soil moisture - again it would challenging or adding more uncertainty at the scale GWSC Self-calibrating version (sc-PDSI) works across different climates
 
 Weaknesses:
 
-Complex calculation
-Fixed timescale (not flexible like SPI) - this is another reson that it wont allign with GWSC's need
-
+Complex calculation Fixed timescale (not flexible like SPI) - this is another reson that it wont allign with GWSC's need
 
 **Decisions process**
 
 We are likely looking for a meteorological index. It appears that something similar to the Standardized Precipitation Index (SPI) may be appropriate. To understand the limitations of SPI and align it with GWSC’s needs, we first examine how standard SPI values are calculated and then consider what modifications or extensions may be required.
 
-
-
 **SPI Calculation Process**
-
 
 **Step 1: Collect Precipitation Data**
 
 We need at least 30 years of monthly precipitation data for the location.
 
-
-
 **Step 2: Choose Time Scale**
 
-Decide the accumulation period (1, 3, 6, 12, or 24 months). 
+Decide the accumulation period (1, 3, 6, 12, or 24 months).
 
 For example:
 
-SPI-3: Sum precipitation over 3-month periods
-SPI-6: Sum precipitation over 6-month periods
-
+SPI-3: Sum precipitation over 3-month periods SPI-6: Sum precipitation over 6-month periods
 
 **Step 3: Aggregate Precipitation**
 
-For each month, sum the precipitation over your chosen time scale.
-Example for SPI-3 at March 2026:
+For each month, sum the precipitation over your chosen time scale. Example for SPI-3 at March 2026:
 
 Sum = Jan 2026 + Feb 2026 + Mar 2026
 
+So this is something like;
+
+| Year     | Jan+Feb+Mar (mm) |
+|----------|-----------------:|
+| 1994     |              145 |
+| 1995     |              178 |
+| 1996     |              132 |
+| 1997     |              165 |
+| 1998     |              190 |
+| ...      |              ... |
+| nth year |            value |
 
 **Step 4: Fit Probability Distribution**
 
-Fit the aggregated precipitation data to a Gamma distribution (most common) or other distribution.
-The Gamma distribution is defined by two parameters:
+Fit the aggregated precipitation data to a Gamma distribution (most common) or other distribution. The Gamma distribution is defined by two parameters:
 
+We need to estimate two parameters: $\alpha$ (shape) and $\beta$ (scale)
 
+**Step 4a: Calculate the mean**
+
+$x_{mean} = (145 + 178 + 132 + ... + 141) / 30$\
+$x_{mean} = 4,797 / 30$\
+$x_{mean} = 159.9 mm$\
+
+**Step 4b: Calculate A** : intermediate parameter used in the Method of Moments estimation to calculate the Gamma distribution shape parameter
+
+$$
+A = \ln(\bar{x}) - \frac{\sum \ln(x)}{n}
+$$
+
+$$
+\ln(\bar{x}) = \ln(159.9) = 5.074
+$$
+
+$$
+\begin{aligned}
+\ln(145) &= 4.977 \\
+\ln(178) &= 5.182 \\
+\ln(132) &= 4.883 \\
+&\vdots \\
+\ln(141) &= 4.949
+\end{aligned}
+$$ $$
+\sum \ln(x) = 150.89
+$$ $$
+\begin{aligned}
+A &= 5.074 - \frac{150.89}{30} \\
+  &= 5.074 - 5.030 \\
+  &= 0.044
+\end{aligned}
+$$
+
+**Step 4c: Calculate** $\alpha$ (shape parameter)
+
+$$
+\begin{aligned}
+\alpha &= \frac{1}{4A}\left[1 + \sqrt{1 + \frac{4A}{3}}\right] \\
+       &= \frac{1}{4(0.044)}\left[1 + \sqrt{1 + \frac{4(0.044)}{3}}\right] \\
+       &= \frac{1}{0.176}\left[1 + \sqrt{1.0587}\right] \\
+       &= \frac{1}{0.176}\left(1 + 1.0289\right) \\
+       &= 5.682 \times 2.0289 \\
+       &= 11.53
+\end{aligned}
+$$
+
+**Step 4d: Calculate** $\beta$ (scale parameter)
+
+$$
+\begin{aligned}
+\beta &= \frac{\bar{x}}{\alpha} \\
+      &= \frac{159.9}{11.53} \\
+      &= 13.87\ \mathrm{mm}
+\end{aligned}
+$$
+
+**Summary of Fitted Gamma Distribution:**
+
+Our Gamma distribution parameters:
+
+$\alpha$ (shape) = 11.53 $\beta$ = 13.87 mm
+
+What This Means:\
+The Gamma probability density function is now:\
+
+$$
+\begin{aligned}
+g(x) &= \frac{1}{\beta^{\alpha}\,\Gamma(\alpha)} \, x^{\alpha-1} \, e^{-x/\beta} \\[6pt]
+     &= \frac{1}{13.87^{11.53}\,\Gamma(11.53)} \, x^{10.53} \, e^{-x/13.87}
+\end{aligned}
+$$
+
+Verification:\
+Let's check if our fitted distribution matches the data:\
+Mean of Gamma distribution:\
+
+$$
+\begin{aligned}
+\text{Mean} &= \alpha \times \beta \\[6pt]
+            &= 11.53 \times 13.87 \\[6pt]
+            &= 159.9\ \text{mm}
+\end{aligned}
+$$
+
+Standard deviation of Gamma distribution:
+
+$$
+\begin{aligned}
+\text{SD} &= \sqrt{\alpha}\times\beta \\[6pt]
+          &= \sqrt{11.53}\times 13.87 \\[6pt]
+          &= 3.396 \times 13.87 \\[6pt]
+          &= 47.1\ \text{mm}
+\end{aligned}
+$$ Visual Understanding:\
+With $\alpha$ = 11.53 and $\beta$ = 13.87, the Gamma distribution looks like:\
+
+Most likely value: Around 140-180 mm\
+Range: Typically 70-250 mm (95% of values)\
+Shape: Slightly right-skewed (longer tail toward high values)\
 
 **Step 5: Calculate Cumulative Probability**
 
 Transform the gamma distribution to cumulative probability.
 
-This gives you the probability of getting precipitation  x.
+This gives you the probability of getting precipitation x.
 
+What is the probability of getting equal or lower 130mm? (for example) Example for current March 2026 = 130mm:
+
+$$
+\begin{aligned}
+\text{Using } \alpha &= 11.53,\ \beta = 13.87, \\[6pt]
+P(X \le 130) &= G(130) \\[6pt]
+            &= 0.23
+\end{aligned}
+$$
+
+This means: 23% of historical periods had eual or lower than 130mm OrThis is the 23rd percentile
+
+This probability (0.23) then goes into Step 6 to be converted to SPI!
 
 **Step 6: Transform to Standard Normal Distribution**
 
+Why we need to do this?
+
+Gamma distribution is skewed, bounded at zero, and often heavy tailed
+
+But to compare wet/dry conditions across;
+
+different climate/ different seasons/ different time scales/
+
+we need standardized index
+
+to do that we define standard normal distribution (mean = 0, sd = 1)
+
+![](Figures/gamma%20to%20normal.png){width="70%"}
+
+Why we needed?
+
+Now consider two locations:
+
+Location A (wet climate)
+
+Gamma is wide and less skewed.
+
+Location B (arid climate)
+
+Gamma is extremely skewed.
+
+A probability of 0.23 in each place does not translate into the same distance from the mean in rainfall space.
+
+So comparisons become difficult.
+
 Convert the cumulative probability to standard normal distribution (mean=0, std=1):
 
+What z-score in a standard normal distribution corresponds to the 23rd percentile?
+
+**Step 6a: Calculate t**
+
+$$
+\begin{aligned}
+t &= \sqrt{\ln\!\left(\frac{1}{G(x)^2}\right)} \\[6pt]
+  &= \sqrt{\ln\!\left(\frac{1}{0.23^2}\right)} \\[6pt]
+  &= \sqrt{\ln\!\left(\frac{1}{0.0529}\right)} \\[6pt]
+  &= \sqrt{\ln(18.903)} \\[6pt]
+  &= \sqrt{2.939} \\[6pt]
+  &= 1.714
+\end{aligned}
+$$
+
+**Step 6b: Apply the approximation formula**
+
+Constant\
+
+$$
+\begin{aligned}
+c_0 &= 2.515517 \\ 
+c_1 &= 0.802853 \\ 
+c_2 &= 0.010328 \\[2mm]
+d_1 &= 1.432788 \\ 
+d_2 &= 0.189269 \\ 
+d_3 &= 0.001308
+\end{aligned}
+$$
+
+$$
+\begin{aligned}
+\text{Numerator} &= c_0 + c_1 t + c_2 t^2 \\[2mm]
+                 &= 2.515517 + 0.802853(1.714) + 0.010328(1.714^2) \\[1mm]
+                 &= 2.515517 + 1.376090 + 0.030352 \\[1mm]
+                 &= 3.921959 \\[3mm]
+\text{Denominator} &= 1 + d_1 t + d_2 t^2 + d_3 t^3 \\[1mm]
+                   &= 1 + 1.432788(1.714) + 0.189269(1.714^2) + 0.001308(1.714^3) \\[1mm]
+                   &= 1 + 2.455798 + 0.556048 + 0.006580 \\[1mm]
+                   &= 4.018426 \\[3mm]
+\text{Ratio} &= \frac{\text{Numerator}}{\text{Denominator}} \\[1mm]
+              &= \frac{3.921959}{4.018426} \\[1mm]
+              &= 0.976
+\end{aligned}
+$$
+
+**Step 6c: Calculate SPI**
+
+$$
+\begin{aligned}
+\text{SPI} &= -(t - \text{Ratio}) \\[2mm]
+           &= -(1.714 - 0.976) \\[1mm]
+           &= -0.738 \\[1mm]
+           &\approx -0.74
+\end{aligned}
+$$
 
 ```{r}
+#| warning: false
+#| message: false
+#| echo: false
+#| error: false
 
 # Load library
 library(SPEI)
@@ -187,21 +861,16 @@ plot(spi_result, main = "SPI-3")
 
 ```
 
+```{r copy-pdf, eval=TRUE, echo=FALSE}
+pdf_source <- "C:/Users/tajayalath/Box/R - Projects - Tharaka/Drought-indices/Readme.pdf"
+pdf_dest   <- "C:/Users/tajayalath/Box/GWSC Shared Drive/Analysis Team Stuff/Data Science/Data Projects/Drought Metrics/Readme.pdf"
 
-
-
-
-
-**Notes to later use**
-
-Limitation with relying on Precipitation - flash drought - levatedtemperatures and heightened evaporative demand
-
-drought is not solely a result of natural variability but also a product of human decisions and actions - i.e.  The increasing demand for water due to population growth, urbanization,and agricultural expansion has heightened the risk of water scarcity, even in regions not traditionally prone to drought
-
-
-More earliest definition of drought:
-
-- 21‐day period with total rainfall less than 30% of the regionalaverage, relying solely on precipitation thresholds to characterize prolonged drynes
-
-
-
+# Only copy if the PDF exists
+if (file.exists(pdf_source)) {
+  tryCatch({
+    file.copy(pdf_source, pdf_dest, overwrite = TRUE)
+  }, error = function(e) {
+    message("Could not copy PDF: ", e$message)
+  })
+}
+```
