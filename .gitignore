@@ -2,10 +2,18 @@
 .Rhistory
 .RData/
 .Ruserdata
-.Figures/
-.Data/
+
+Figures/
+
+Data/
+*.rds
 
 
 
 /.quarto/
 **/*.quarto_ipynb
+
+
+#git rm -r --cached Data
+#git commit -m "Stop tracking Data folder"
+#git push
