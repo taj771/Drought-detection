@@ -114,8 +114,9 @@ safe_spi <- function(precip_vec, scale = 3) {
     # For scale=6  → need at least 24 valid months (6 * 4)
     # For scale=12 → need at least 48 valid months (12 * 4)
     # Without enough data, the Gamma fit is statistically meaningless
-    if (sum(!is.na(precip_vec)) < (scale * 4)) {
-      return(rep(NA_real_, length(precip_vec)))  # return NAs, same length as input
+    min_obs <- max(scale * 4, 24)
+    if (sum(!is.na(precip_vec)) < min_obs) {
+      return(rep(NA_real_, length(precip_vec)))
     }
     
     # ── Core calculation ──
@@ -170,6 +171,7 @@ spi_results <- monthly_r %>%
   mutate(
     # Each safe_spi() call receives the full chronological precip history
     # for this pixel and returns a z-score for every single month
+    spi1  = safe_spi(monthly_precip, scale = 1),   # single-month anomaly
     spi3  = safe_spi(monthly_precip, scale = 3),   # Jan+Feb+Mar vs historical Jan+Feb+Mar
     spi6  = safe_spi(monthly_precip, scale = 6),   # 6-month window
     spi12 = safe_spi(monthly_precip, scale = 12)   # 12-month window
@@ -182,3 +184,15 @@ head(spi_results)
 
 
 saveRDS(spi_results, "./Data/spi_results.rds")
+
+
+
+
+
+
+
+
+
+
+
+

@@ -13,12 +13,11 @@ editor: visual
 
 # Standardized Precipitation Index (SPI)
 
-- Widely use drought index
+-   Widely use drought index
 
-## How to calculate 
+## How to calculate
 
 **Step 1**
-
 
 Collect raw monthly precipitation (Input)
 
@@ -30,11 +29,9 @@ One value per pixel per month. It needs a continuous time series ordered by time
 
 Rolling sum at chosen timescale (Aggregation)
 
-
 Before any statistics, precipitation is summed over the chosen window. This is what the "3", "6", "12" in SPI-3 / SPI-6 / SPI-12 means.
 
 SPI-3 for March = precip(Jan) + precip(Feb) + precip(Mar)
-
 
 Why different scales?\
 SPI-3 captures short-term agricultural drought.\
@@ -45,7 +42,6 @@ SPI-12 tracks long-term groundwater and reservoir trends.
 
 Fit a Gamma distribution — per calendar month (Statistics)
 
-
 This is the core statistical step. A Gamma distribution is fitted separately for each calendar month at each pixel using Maximum Likelihood Estimation (MLE). So January gets its own fit, February its own, etc. — because precipitation is seasonal.
 
 These disributions are based on 3 moth sum, For instance March we take the sum of Jan + Feb + Mar so this sum use to establish the gamma distribution\
@@ -54,18 +50,13 @@ Why not single month prcep. why it use three months sum?
 
 Single month precipitation is very noisy — one unusually dry month tells you very little about actual drought.
 
-
-Gamma ($\alpha, \beta$) where ; $\alpha$ = shape  ·   $\beta$ = scale
-
+Gamma ($\alpha, \beta$) where ; $\alpha$ = shape · $\beta$ = scale
 
 Zero precipitation problem: Gamma cannot handle zeros (common in dry seasons). The package uses a mixed distribution:
 
-
 $P(X ≤ x) = q + (1 − q) × Gamma_CDF(x)$
 
-
 where q = probability of a zero-precipitation month
-
 
 **Step 4**
 
@@ -73,13 +64,11 @@ Convert to cumulative probability (Transform)
 
 Each observed precipitation value is converted to a probability — what fraction of historical months were drier than this month
 
-
 The estimated gamma distribution gives you the probability of getting precipitation x
-
 
 For example What is the probability of getting equal or lower 130mm for a given month (i.e. March)
 
-And let's say that we have estimated $\alpha$ and $\beta$ are 11 and 13 respectively 
+And let's say that we have estimated $\alpha$ and $\beta$ are 11 and 13 respectively
 
 Gamma probability density function is:\
 
@@ -97,9 +86,6 @@ What 0.23 means intuitively - (Ways to interpret)\
 77% of historical months were wetter than this\
 This month is in the lower 23rd percentile — drier than normal\
 
-
-
-
 **Step 4**
 
 Convert to cumulative probability (Transform) - Standard Normal
@@ -108,9 +94,8 @@ Why we need to do this?\
 
 Gamma distribution is skewed, bounded at zero, and often heavy tailed
 
-But to compare \
-- wet/dry conditions across;
-- different climate/ different seasons/ different time scales\
+But to compare\
+- wet/dry conditions across; - different climate/ different seasons/ different time scales\
 - we need standardized index
 
 To do that it define standard normal distribution (mean = 0, sd = 1)
@@ -133,8 +118,7 @@ The cumulative probability is passed through the inverse normal function to map 
 
 $$
 SPI = Φ⁻¹(p) = qnorm(p)
-$$
-So what SPI = −0.5 means "0.5 standard deviations below the long-term average" and why values are comparable across regions and seasons.
+$$ So what SPI = −0.5 means "0.5 standard deviations below the long-term average" and why values are comparable across regions and seasons.
 
 For instance SPI = +0.5 means:
 
@@ -153,9 +137,6 @@ This month's accumulated precipitation was 0.5 standard deviations above the lon
 spi_results <- readRDS("./Data/spi_results.rds")
 
 ```
-
-
-
 
 ```{r}
 #| warning: false
@@ -231,8 +212,8 @@ scale_x_continuous(
 
     theme_dark() +
     theme(
-      axis.text.x.bottom = element_text(size = 5, angle = 90, vjust = 0.5, hjust = 1, colour = "black", face = "bold"),
-      axis.text.x.top    = element_text(size = 12, angle = 0, colour = "#aaaaaa", face = "bold"),
+      axis.text.x.bottom = element_text(size = 2, angle = 90, vjust = 0.5, hjust = 1, colour = "black", face = "bold"),
+      axis.text.x.top    = element_text(size = 8, angle = 90, colour = "#aaaaaa", face = "bold"),
       axis.ticks.x.top   = element_line(colour = "grey40"),
       legend.position    = "bottom",
       legend.key.size    = unit(0.4, "cm"),
@@ -264,7 +245,6 @@ p12 <- plot_spi(country_avg, col = "spi12", title = "SPI-12")
 p3
 ```
 
-
 ```{r}
 #| warning: false
 #| message: false
@@ -277,7 +257,6 @@ p3
 p6
 ```
 
-
 ```{r}
 #| warning: false
 #| message: false
@@ -289,8 +268,6 @@ p6
 #| out-width: "100%"    # ← forces the image to fill the full page width
 p12
 ```
-
-
 
 ```{r}
 #| warning: false
@@ -338,23 +315,21 @@ country_avg |>
 
 **What decisions we have to make to interpret an event as drought?**
 
-
 SPI was developed by McKee, Doesken & Kleist (1993). They looked at the standard normal distribution and chose thresholds that corresponded to meaningful return periods — how rarely an event occurs historically.
-
 
 Their original classification published in that 1993 paper:
 
 **SPI Classification Table - Original publication**
 
-| SPI Value Range      | Category            | Their Reasoning                     |
-|----------------------|--------------------|--------------------------------------|
-| ≥ +2.0               | Extremely wet       | Occurs ~2.3% of the time             |
-| +1.5 to +1.99        | Very wet            | Occurs ~4.4% of the time             |
-| +1.0 to +1.49        | Moderately wet      | Occurs ~9.2% of the time             |
-| −0.99 to +0.99       | Near normal         | The middle 68%                       |
-| −1.0 to −1.49        | Moderately dry      | Occurs ~9.2% of the time             |
-| −1.5 to −1.99        | Severely dry        | Occurs ~4.4% of the time             |
-| ≤ −2.0               | Extremely dry       | Occurs ~2.3% of the time             |
+| SPI Value Range | Category       | Their Reasoning           |
+|-----------------|----------------|---------------------------|
+| ≥ +2.0          | Extremely wet  | Occurs \~2.3% of the time |
+| +1.5 to +1.99   | Very wet       | Occurs \~4.4% of the time |
+| +1.0 to +1.49   | Moderately wet | Occurs \~9.2% of the time |
+| −0.99 to +0.99  | Near normal    | The middle 68%            |
+| −1.0 to −1.49   | Moderately dry | Occurs \~9.2% of the time |
+| −1.5 to −1.99   | Severely dry   | Occurs \~4.4% of the time |
+| ≤ −2.0          | Extremely dry  | Occurs \~2.3% of the time |
 
 They essentially mirrored the normal distribution's natural breakpoints — the ±1, ±1.5, ±2 boundaries are not arbitrary, they correspond to well-known probability thresholds.
 
@@ -362,22 +337,19 @@ Are they universal? No — and this is important
 
 **Drought Thresholds by Organisation**
 
-| Organisation                         | Drought Starts At |
-|--------------------------------------|-------------------|
-| McKee et al. (1993, original SPI)    | −1.0              |
-| US Drought Monitor                   | −0.5 (mild) / −1.0 (moderate) |
-| WMO (World Meteorological Organization) | −1.0          |
-| Some agricultural studies            | −0.8              |
+| Organisation                            | Drought Starts At             |
+|-----------------------------------------|-------------------------------|
+| McKee et al. (1993, original SPI)       | −1.0                          |
+| US Drought Monitor                      | −0.5 (mild) / −1.0 (moderate) |
+| WMO (World Meteorological Organization) | −1.0                          |
+| Some agricultural studies               | −0.8                          |
 
-
-
-The WMO standardized on −1.0 in their 2012 guidelines and recommended all countries use SPI with that threshold for comparability — so −1.0 is now the most internationally accepted convention. 
+The WMO standardized on −1.0 in their 2012 guidelines and recommended all countries use SPI with that threshold for comparability — so −1.0 is now the most internationally accepted convention.
 
 \begingroup
 \color{red}
 
 Is GWSC align with this? or we define something own. If we do something our own we can rely on the same logic, we can look historic event of a given county and define those thresholds?
-
 
 So the next Big 3 Q's we want to answer
 
@@ -385,33 +357,27 @@ Q1: Frequency: How often a drought event happen?\
 
 To answer this, we first need to clearly define what constitutes a drought. For example, is a drought defined as SPI ≤ −1 sustained over three consecutive months? This theoretical definition needs to be confirmed first. Once it is agreed upon by the team, the data scientists can consistently apply that definition and calculate the frequency based on the derived SPI values.
 
-
 Q2: Duration: How long\
 
 Need broader discussion on how long dry event we confider as a drought?. Is it something like period that stay SPI value below -1 for consecutive three month?
-
 
 Q3: What magnitude\
 
 Is SPI scale along tell a good fit or we need something else?
 
-
 \endgroup
 
+\newpage
 
- 
- \newpage
- 
-# Standardized Precipitation Evapotranspiration Index (SPEI) -  Thornthwaite PET method
+# Standardized Precipitation Evapotranspiration Index (SPEI) - Thornthwaite PET method
 
-## How to calculate 
+## How to calculate
 
 **Step 1**
 
 Collect raw monthly precipitation + temperature + lattitude (Input)
 
 SPEI needs three inputs per pixel per month — this is the key difference from SPI which only needs precipitation. A minimum of 30 years is recommended.
-
 
 **Step 2**
 
@@ -429,34 +395,27 @@ Latitude (to calculate day length)
 
 That’s why it’s popular when only temperature data are available.
 
-
 **How PET calculation works within Thornthwaite method**
-
 
 Step 1: Compute Monthly Heat Index
 
-
 $$
 i = \left(\frac{T}{5}\right)^{1.514}
-$$
-Where:\
+$$ Where:\
 $T$ = mean monthly temperature (°C)\
-If $T$ < 0, then PET = 0 for that month.
+If $T$ \< 0, then PET = 0 for that month.
 
 Step 2: Annual Heat Index
 
 $$
 I = \sum_{m=1}^{12} i_m
-$$
-Step 3: Compute Exponent a
+$$ Step 3: Compute Exponent a
 
 $$
 a = 6.75 \times 10^{-7} I^3 - 7.71 \times 10^{-5} I^2 + 1.792 \times 10^{-2} I + 0.49239
 $$
 
-
 Step 4: Monthly PET
-
 
 $$
 \text{PET} = 16 \left( \frac{10 T}{I} \right)^a
@@ -465,9 +424,7 @@ $$
 Where:
 
 $T$ = mean monthly temperature (°C)\
-$I$ = annual heat index (sum of monthly i)
-$a$ = empirical exponent computed from I
-
+$I$ = annual heat index (sum of monthly i) $a$ = empirical exponent computed from I
 
 Then adjust for:
 
@@ -509,13 +466,11 @@ Balanced → normal\
 10mm rain − 90mm PET\
 Deficit → drought\
 
-
 Why this catches drought SPI misses: A hot summer with average rainfall but very high PET will give a negative water balance → SPEI flags drought. SPI sees normal precipitation and says nothing is wrong. Water balance can be negative — this is why SPEI needs a different distribution than SPI in the next step.
 
 **Step 4**
 
 Rolling sum at chosen timescale (Aggregation)
-
 
 Same as SPI — the water balance is accumulated over the chosen window.
 
@@ -523,23 +478,19 @@ SPEI-3 for March = WB(Jan) + WB(Feb) + WB(Mar)
 
 **Step 5**
 
-Fit a Log-logistic distribution — per calendar month 
-
+Fit a Log-logistic distribution — per calendar month
 
 Same concept as SPI's Gamma fitting — fitted separately per calendar month per pixel — but a different distribution is used
 
-
 SPEI uses Log-logistic:Works on any value including negatives. Required because water balance can be negative.
-
 
 Zero handling: Because water balance includes negative values, there is no need for the zero-inflation correction that SPI requires. The log-logistic distribution covers the full range naturally.
 
 **Step 6**
 
-Convert to probability → Standard Normal → SPEI value 
+Convert to probability → Standard Normal → SPEI value
 
 Identical final steps to SPI — cumulative probability then inverse normal:
-
 
 $$
 p = F_{\text{LL}}(D)
@@ -548,7 +499,6 @@ $$
 $$
 \text{SPEI} = \Phi^{-1}(p) = \text{qnorm}(p)
 $$
-
 
 ## Mock example run for Argentina 2000:2020 using ERA5 data (SPEI)
 
@@ -561,7 +511,6 @@ $$
 spei_results <- readRDS("./Data/spei_results.rds")
 
 ```
-
 
 ```{r}
 #| warning: false
@@ -658,7 +607,6 @@ p12 <- plot_spei(country_avg, col = "spei12", title = "SPEI-12")
 #p3 / p6 / p12
 ```
 
-
 ```{r}
 #| warning: false
 #| message: false
@@ -670,7 +618,6 @@ p12 <- plot_spei(country_avg, col = "spei12", title = "SPEI-12")
 #| out-width: "100%"    # ← forces the image to fill the full page width
 p3
 ```
-
 
 ```{r}
 #| warning: false
@@ -684,7 +631,6 @@ p3
 p6
 ```
 
-
 ```{r}
 #| warning: false
 #| message: false
@@ -696,7 +642,6 @@ p6
 #| out-width: "100%"    # ← forces the image to fill the full page width
 p12
 ```
-
 
 ```{r}
 #| warning: false
@@ -747,42 +692,36 @@ country_avg |>
 
 Q1. There are few other ways of calculating PET
 
-
 **- Hargreaves**
 
-- Needs: Min, max, and mean monthly temperature + latitude\
-- Best for: When you have min/max temps but no radiation or wind data\
-- Why better than Thornthwaite: Uses temperature range (Tmax − Tmin) as a proxy for solar radiation — a hot day with a big temperature swing means more radiation and more evaporation\
-- ERA5 relevance: ERA5 provides Tmin and Tmax so this is achievable with your data\
+-   Needs: Min, max, and mean monthly temperature + latitude\
+-   Best for: When you have min/max temps but no radiation or wind data\
+-   Why better than Thornthwaite: Uses temperature range (Tmax − Tmin) as a proxy for solar radiation — a hot day with a big temperature swing means more radiation and more evaporation\
+-   ERA5 relevance: ERA5 provides Tmin and Tmax so this is achievable with your data\
 
 **-Penman-Monteith**
 
-- Needs: Temperature, wind speed, solar radiation, humidity, elevation < lot of climate data - may be more accurate\
-- Best for: Most physically accurate — the FAO standard method\
-- Why best: Uses the actual physical drivers of evaporation — energy (radiation), aerodynamic (wind), and humidity deficit\
-- ERA5 relevance: ERA5 provides all of these variables so full Penman-Monteith is possible — but requires more data extraction work from your Databricks table- I think we need to discuss this with S2S gruop ho CMIP data perform here.
+-   Needs: Temperature, wind speed, solar radiation, humidity, elevation \< lot of climate data - may be more accurate\
+-   Best for: Most physically accurate — the FAO standard method\
+-   Why best: Uses the actual physical drivers of evaporation — energy (radiation), aerodynamic (wind), and humidity deficit\
+-   ERA5 relevance: ERA5 provides all of these variables so full Penman-Monteith is possible — but requires more data extraction work from your Databricks table- I think we need to discuss this with S2S gruop ho CMIP data perform here.
 
 **-Priestley-Taylor**
 
-- Needs: Temperature + solar radiation (no wind or humidity needed)\
-- Best for: Middle ground between Hargreaves and full Penman-Monteith\
-- Why useful: More physically grounded than Thornthwaite but simpler than full Penman-Monteith\
-
-
+-   Needs: Temperature + solar radiation (no wind or humidity needed)\
+-   Best for: Middle ground between Hargreaves and full Penman-Monteith\
+-   Why useful: More physically grounded than Thornthwaite but simpler than full Penman-Monteith\
 
 \endgroup
 
 I will add more indices here, meanwhile let's think about the other objectives we have to deal with.
 
-
 # With selected matrices what each tell about a given case?
 
-Here I am thinking of overlapping each indices to understand 
-
+Here I am thinking of overlapping each indices to understand
 
 Q. Each telling a different story?if so how much different?\
 Q. Which one is the most understandable for the public?\
-
 
 Output somethinglike a place X has drought 1 per decade with function A (matrix A)
 
@@ -790,20 +729,14 @@ Output somethinglike a place X has drought 1 per decade with function A (matrix 
 
 Evaluation criteria of each indices - Think about now we have a menue of indices, now we want to asesss whih one tell the most acccutare story about drought?
 
-
-1. NDVI — vegetation response\
+1.  NDVI — vegetation response\
 
 NDVI from MODIS measures how green/stressed vegetation is. The logic is simple — if drought is real, plants should show stress 1–3 months later. Ife we correlate monthly NDVI anomalies against your SPI/SPEI values at matching pixels and months. The index with the highest correlation best predicts vegetation stress. Particularly useful in agricultural and grassland areas.
 
-
-
-2. Soil moisture — SMAP\
-NASA SMAP measures actual surface soil moisture from satellite microwave sensors. This is arguably the most direct validation — if SPI/SPEI says drought, soil should actually be dry. Ifw we correlate monthly soil moisture anomalies against your indices. SPEI tends to outperform SPI here in warm months because PET-driven soil drying is captured.
+2.  Soil moisture — SMAP\
+    NASA SMAP measures actual surface soil moisture from satellite microwave sensors. This is arguably the most direct validation — if SPI/SPEI says drought, soil should actually be dry. Ifw we correlate monthly soil moisture anomalies against your indices. SPEI tends to outperform SPI here in warm months because PET-driven soil drying is captured.
 
 I will explore this dataset a little more, as it would be a good source for calculating the standardized soil moisture index and other drought matrices we can derive.
 
-
-3. Crop yield anomalies\
-If drought indices are meaningful for agriculture, they should predict yield anomalies. If we correlate province-level annual yield anomalies (soy, maize, wheat) against spatially averaged SPI/SPEI for the growing season. SPI-3 during critical growth months typically matters most.
-
-
+3.  Crop yield anomalies\
+    If drought indices are meaningful for agriculture, they should predict yield anomalies. If we correlate province-level annual yield anomalies (soy, maize, wheat) against spatially averaged SPI/SPEI for the growing season. SPI-3 during critical growth months typically matters most.
