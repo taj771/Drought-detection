@@ -2,6 +2,10 @@
 .Rhistory
 .RData
 .Ruserdata
+.Figures
+.Data
+
+
 
 /.quarto/
 **/*.quarto_ipynb
