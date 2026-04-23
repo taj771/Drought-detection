@@ -1,5 +1,4 @@
 #______Calculation of SPI_________________________
-# Example country: Argentina
 
 
 # Load necessary libraries -------------

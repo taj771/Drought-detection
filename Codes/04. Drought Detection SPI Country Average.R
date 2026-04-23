@@ -23,7 +23,7 @@ spi_results <- readRDS("./Data/spi_results.rds")
 # ─────────────────────────────────────────────────────────────────────────────
 
 country_avg <- spi_results %>%
-  group_by(year, month) %>%
+  group_by(year, month) %>% # this is need to work on as counret average may not works - how about Principla component analysis/cluste analysis to identify the cluster 
   summarise(
     spi1  = mean(spi1,  na.rm = TRUE),
     spi3  = mean(spi3,  na.rm = TRUE),
@@ -67,8 +67,8 @@ country_avg <- spi_results %>%
 
 drought_config <- list(
   method          = "threshold",   # "threshold" or "cumulative"
-  start_threshold = -1,              # drought starts on any negative SPI
-  end_threshold   = -0.9999999999999999,              # only used for threshold method
+  start_threshold = -0.5,              # drought starts on any negative SPI
+  end_threshold   = -0.4999999999999,              # only used for threshold method
   min_duration    = 2               # need 2 consecutive negative months to start
 )
 
@@ -435,7 +435,7 @@ p_spi1 / p_spi3 / p_spi6 / p_spi12 +
     )
   )
 
-ggsave("./Figures/drought_events_spi_def3.png", width = 14, height = 18, dpi = 300)
+ggsave("./Figures/drought_events_spi_def1.png", width = 14, height = 18, dpi = 300)
 
 
 
@@ -497,6 +497,6 @@ spi_drought_summary <- list(
 print(spi_drought_summary)
 
 
-write.csv(spi_drought_summary, "./Data/spi_drought_summary_def3.csv")
+write.csv(spi_drought_summary, "./Data/spi_drought_summary_def1.csv")
 
 
