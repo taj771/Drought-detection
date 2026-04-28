@@ -7,6 +7,7 @@ format:
     pdf-engine: xelatex
     documentclass: article
     number-sections: true
+    keep-tex: true
 header-includes:
   - \pagenumbering{gobble}
 
@@ -78,8 +79,7 @@ df |>
 
 ```
 
-![](Figures/drought_events_spi_def1.png){width="120%"} 
-
+![](Figures/drought_events_spi_def1.png){width="120%"}
 
 ## Thresholds Definition 02
 
@@ -90,6 +90,7 @@ df |>
 #| message: false
 #| echo: false
 #| error: false
+#| tbl-pos: H
 
 library(tidyverse)
 
@@ -112,6 +113,7 @@ df |>
   ) |>
   gt() |>
   tab_header(title = "Drought Event Summary : Definition 2") |>
+  tab_options(latex.use_longtable = TRUE) |>
   tab_options(
   heading.title.font.size = px(10)   # adjust size here
 )|>
@@ -142,11 +144,9 @@ df |>
 
 ![](Figures/drought_events_spi_def2.png){width="120%"}
 
-
 ## Thresholds Definition 03
 
 –1: Number of consecutive months in which the drought index remained below –1. This method is a traditional way to define drought with a commonly accepted threshold. To initiate a drought event, there should be a minimum of two consecutive months where the SPI remains below –1, and once it returns to an SPI value greater than –1, the drought event ends. It does not need to return to a positive value — an SPI value that is still negative but higher than –1 would call off the drought event.
-
 
 ```{r}
 #| warning: false
@@ -178,6 +178,7 @@ df |>
   tab_options(
   heading.title.font.size = px(10)   # adjust size here
 )|>
+      tab_options(latex.use_longtable = TRUE) |>
  # fmt_number(
  #   columns = c(`Total Weight using Parent code`, `Total Weight using Sub codes`),
  #  decimals = 0
@@ -204,10 +205,12 @@ df |>
 ```
 
 ![](Figures/drought_events_spi_def3.png){width="120%"}
+
+\newpage
+
 **Based on SPEI**
 
 ## Thresholds Definition 01
-
 
 ```{r}
 #| warning: false
@@ -239,6 +242,7 @@ df |>
   tab_options(
   heading.title.font.size = px(10)   # adjust size here
 )|>
+    tab_options(latex.use_longtable = TRUE) |>
  # fmt_number(
  #   columns = c(`Total Weight using Parent code`, `Total Weight using Sub codes`),
  #  decimals = 0
@@ -264,12 +268,9 @@ df |>
 
 ```
 
-![](Figures/drought_events_spei_def1.png){width="120%"} 
-
-
+![](Figures/drought_events_spei_def1.png){width="120%"}
 
 ## Thresholds Definition 02
-
 
 ```{r}
 #| warning: false
@@ -328,12 +329,7 @@ df |>
 
 ![](Figures/drought_events_spei_def2.png){width="120%"}
 
-
-
-
-
 ## Thresholds Definition 03
-
 
 ```{r}
 #| warning: false
@@ -391,22 +387,3 @@ df |>
 ```
 
 ![](Figures/drought_events_spei_def3.png){width="120%"}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

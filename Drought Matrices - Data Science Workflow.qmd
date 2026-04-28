@@ -1,0 +1,676 @@
+---
+title: "Drought Matrices"
+author: "Analysis Plan"
+format:
+  pdf:
+    pdf-engine: xelatex
+    documentclass: article
+    number-sections: true
+    keep-tex: true
+    toc: true
+    include-in-header:
+      text: |
+        \usepackage{tabularx}
+        \widowpenalty=10000
+        \clubpenalty=10000
+        \displaywidowpenalty=10000
+  docx:
+    toc: true
+    number-sections: true
+    highlight-style: github
+editor: visual
+---
+
+\newpage
+
+The Data Science team's workflows on this project can be broadly categorized into a few interconnected phases which, together, aim to identify drought metric definitions for GWSC's use.
+
+# Phase 1 {.unnumbered}
+
+In Phase 1, the main goal is to set up the workflow for calculating SPI and SPEI using ERA5 data and develop an algorithm to detect drought using those derived indices under varying drought definitions.
+
+Workflow Road Map during phase 1:
+
+1.  Calculating SPI using ERA5 data
+2.  Calculating SPEI using ERA5 data
+3.  Detecting drought events under different definitions and thresholds of SPI and SPEI
+
+```{=html}
+<!--
+**For the first phase of this project, this document outlines up to the third step**, where we explain how we set up our workflows for calculating SPI and SPEI, and how we detect and determine the characteristics of drought under different definitions and thresholds.
+--->
+```
+
+## 1.1 Calculating SPI using ERA5 data {.unnumbered}
+
+**Step 1: Collect raw monthly precipitation.**
+
+We use a long time series of monthly precipitation for each pixel covering the period 1970–2000. GWSC has stored the ERA5 data from 1973–2023, so data science will allow flexibility within the code to redefine this as necessary.
+
+**Step 2: Decide the accumulation period (1, 3, 6, or 12 months).**
+
+For example: SPI-3: Sum precipitation over 3-month periods
+
+**Step 3: Aggregate precipitation.**
+
+For each month, sum the precipitation over the chosen timescale. Example for SPI-3 at March 2000:
+
+Sum = January 2000 + February 2000 + March 2000
+
+**Step 4: Fit a probability distribution.**
+
+The aggregated precipitation totals are fitted to a Gamma distribution to model the historical variability of precipitation at each pixel and timescale:
+
+$$f(x) = \frac{x^{\alpha-1} \, e^{-x/\beta}}{\beta^{\alpha} \, \Gamma(\alpha)}, \quad x > 0$$
+
+where $x$ is the aggregated precipitation, $\alpha$ is the shape parameter, $\beta$ is the scale parameter, and $\Gamma(\alpha)$ is the Gamma function. The parameters are estimated separately for each pixel, month, and accumulation period from the long-term historical record.
+
+**Step 5: Calculate Cumulative Probability.**
+
+Transform the gamma distribution to cumulative probability. This gives the probability of getting precipitation x.
+
+**Step 6: Transform to Standard Normal Distribution.**
+
+Gamma distribution is skewed, bounded at zero, and varying across seasons and climates. To enable comparison across different climates, seasons, and timescales, the cumulative Gamma probability $G(x)$ is transformed to a standard normal distribution ($\mu = 0$, $\sigma = 1$):
+
+$$\text{SPI} = \Phi^{-1}(G(x))$$
+
+where $\Phi^{-1}$ is the inverse standard normal (probit) function.
+
+![](Figures/gamma%20to%20normal.png){width="70%"}
+
+The Figure shows the visual summary of steps (4) to (6)
+
+```{=html}
+<!--
+In practice, this is approximated using Abramowitz and Stegun (1965)
+--->
+```
+
+## 1.2 Calculating SPEI using ERA5 data {.unnumbered}
+
+Calculating SPEI requires one additional input compared to SPI: potential evapotranspiration (PET). There are a few ways of calculating PET. We compute PET using two methods:
+
+a)  Thornthwaite
+b)  Penman-Monteith FAO-56.
+
+Option a) is quite straightforward and not data intensive to calculate. In contrast, option b) is highly data intensive and may be challenging to obtain with CMIP data. However, the team is interested in exploring whether the data intensive approach is worth pursuing, based on how these two methods of calculating PET shape the final output of drought detection and its characteristics.
+
+**Step 1: Collect raw monthly precipitation and other required data for PET**.
+
+We use a long-term time series of monthly precipitation and other data to calculate PET at each pixel, covering the period 1970–2000. In particular:
+
+(i) We use temperature, longitude, and latitude data from ERA5 to calculate PET using the Thornthwaite method.
+
+(ii) For the Penman-Monteith FAO-56 method, we use a pre-calculated PET data set derived using the same technique from the ERA5-Land dataset, re-sampled to match the resolution of our existing ERA5 datasets.
+
+```{=html}
+<!--
+The threshold for determining when the difference between the two methods is large enough to justify Penman-Monteith needs to be established. An initial difference of 25% in drought frequency between the two methods can be considered operationally significant. We will assess this by comparing the detected drought events against soil moisture and NDVI anomalies to determine whether Penman-Monteith's additional events correspond to real ecological stress.
+--->
+```
+
+**Step 2: Calculate Water Balance (WB).**
+
+Instead of using precipitation alone as in SPI, we now use the water balance (WB), defined as:
+
+$$WB = Precipitation - PET$$ **Step 3: Decide the accumulation period (1, 3, 6, or 12 months).**
+
+**Step 4: Aggregate Water Balance.**
+
+For each month, sum the Water Balance over the chosen accumulation period. For example: SPEI-3: Sum water balance over 3-month periods
+
+WB Sum = January 2000 + February 2000 + March 2000
+
+**Step 5: Fit a probability distribution.**
+
+The aggregated Water Balances are fitted to a log-logistic distribution (which can accommodate both positive and negative values, as the water balance can be negative) to model the historical variability of WB at each pixel and timescale:
+
+$$F(x) = \left[1 + \left(\frac{\alpha}{x - \gamma}\right)^{\beta}\right]^{-1}$$
+
+where $x$ is the water balance $(P - \text{PET})$, $\alpha$ is the scale parameter, $\beta$ is the shape parameter, and $\gamma$ is the location parameter. The parameters are estimated using the probability weighted moments (PWM) method following Vicente-Serrano et al. (2010).
+
+**Step 6: Calculate Cumulative Probability.**
+
+Transform the log-logistic distribution to cumulative probability. This gives the probability of getting precipitation x.
+
+**Step 7: Transform to Standard Normal Distribution.**
+
+The water balance is modeled using a log-logistic distribution, which can accommodate both positive and negative values and varying skewness across climates and timescales.
+
+To enable comparison across different climates, seasons, and timescales, the cumulative probability $F(D)$ is transformed to a standard normal distribution ($\mu = 0$, $\sigma = 1$):
+
+$$\text{SPEI} = \Phi^{-1}(F(D))$$
+
+where $\Phi^{-1}$ is the inverse standard normal (probit) function.
+
+## 1.3 Detecting drought events under different definitions and thresholds of SPI and SPEI {.unnumbered}
+
+From steps 1 and 2 above, we have data layers containing SPI and SPEI values at a spatial and temporal resolution consistent with GWSC's ERA5 data, across different accumulation periods (SPI-1, SPI-3, SPI-6, etc.). In this step, we use these data layers to detect drought events based on different definitions, varying thresholds, and criteria for both flagging and terminating a drought event.
+
+The data analysis workflow for detecting drought events runs as follows:
+
+**Step 1: Load and prepare the data**
+
+We start with a table of SPI/SPEI values: one row per grid cell per month, covering the whole area of interest (AOI). Each row contains the pixel location (x, y coordinates), the date (year and month), and SPI and SPEI values at four timescales (1, 3, 6, and 12 months).
+
+**Step 2: Set the drought detection rules (configuration block)**
+
+In order to detect drought events, the workflow defines what constitutes a drought. The following rules are set in the configuration block:
+
+**(i). Method:**
+
+- Threshold — a drought ends when the SPI rises back above the end threshold
+- Cumulative — A drought ends when the cumulative index sum recovers to ≥ 0, allowing the drought to persist through temporarily above-normal months. Note: This method is only applicable at the 1-month temporal scale (SPI-1 and SPEI-1).
+
+**(ii). Start threshold** - how low the SPI/SPEI must drop before a drought is declared (e.g. below –0.5)
+
+**(iii). End threshold** - how high the SPI/SPEI must recover before the drought is considered over
+
+**Notes:** We keep these as two separate inputs to maintain the flexibility of setting different scenarios.
+
+**(iv). Minimum duration** - the minimum number of consecutive months the SPI/SPEI must remain below the start threshold before a drought is declared. This applies to SPI-1 and SPEI-1 inputs, particularly when using the cumulative method, as these incorporate a forward-looking aspect not present in longer accumulation periods such as SPI-3 or SPI-6. Setting this value to 1 month removes the forward-looking constraint.
+
+**Step 3: Detect drought events at every grid cell**
+
+The workflow is structured as a loop. Rather than averaging all pixels into a single country-wide value, which would obscure local variability, the code processes every grid cell in the AOI individually. For each grid cell and each SPI/SPEI timescale, the algorithm scans through the monthly time series asking two questions:
+
+**- Question 1 — Is a drought starting here?**
+
+The algorithm checks whether the SPI/SPEI value for the current month falls below the threshold defined in the configuration block. If it does, a drought onset is confirmed and the start date is recorded. If not, the algorithm moves on to the next month.
+
+::: callout-note
+For SPI-1 and SPEI-1 only with cumulative method, an additional onset condition can be applied. The number of consecutive months required to confirm a drought onset is controlled by the minimum duration parameter in the configuration block. When this is set to more than 1, the algorithm looks ahead and checks whether the following months also remain below the start threshold. Only if all consecutive months within the specified window meet this condition is the drought confirmed and the start date recorded. This additional constraint is not applied to SPI-3, SPI-6, SPEI-3 or SPEI-6 as their accumulation windows already provide temporal persistence.
+:::
+
+**-Question 2 — When does the drought end?**
+
+Once a drought has started, the algorithm tracks each subsequent month until the SPI/SPEI recovers to the level defined by the end condition in the configuration block. The termination condition varies depending on the method selected in the configuration block.
+
+a)  Threshold method — the drought event is called off at the first instance the SPI/SPEI recovers back above the starting threshold. For example, if the starting threshold is −0.5, the event ends as soon as SPI/SPEI returns to \> −0.5.
+
+b)  Cumulative method — the drought event is called off once the cumulative sum of negative SPI/SPEI values is fully offset by subsequent positive SPI/SPEI values. In other words, a drought that starts at −0.5 will not end simply because SPI recovers to −0.3. It only ends when the total positive SPI accumulated since onset equals or exceeds the total negative SPI accumulated during the event, i.e. the cumulative sum returns to ≥ 0.
+
+At that point, the end date is recorded and the drought event is closed.
+
+**Step 4: Record drought events and characteristics**
+
+For each confirmed drought event, the following characteristics are recorded:
+
+- Start and end dates
+- Duration in months
+- Peak SPI value (worst point of the drought)
+- Total accumulated deficit (overall severity)
+- Severity class — Mild, Moderate, Severe, or Extreme
+- \textcolor{black}{Percentage of pixels affected}
+
+::: callout-note
+**Algorithm sanity checks.** Before carrying results forward, the data science team runs a series of checks to verify the detection algorithm is behaving correctly.
+
+1.  *Visual event inspection.* A random sample of detected events is pulled from the output table and plotted as time series, showing the SPI/SPEI values month by month alongside the recorded start date, end date, and threshold crossings. This confirms that the algorithm is reading the correct months as onset and termination, and that the threshold logic is applied consistently. An example of this plot is included in the appendix.
+
+2.  *Extreme duration check.* Events at the tail of the duration distribution (e.g., the longest 1% of events) are examined individually. Very long durations can indicate genuine multi-year droughts, but they can also flag cases where the end condition was never triggered due to a code error or an unusual SPI trajectory. Each extreme case is inspected to confirm the termination logic behaved as intended.
+
+3.  *Known drought cross-check.* One or more years with well-documented drought conditions in the study area are identified from the literature or GWSC records. The algorithm output for those years is checked to confirm that drought events are detected with the expected spatial extent and severity class. A failure to flag known drought years would indicate a problem with the threshold configuration or the underlying SPI/SPEI values.
+
+4.  *Zero-output pixel check.* Pixels where the algorithm detects no drought events across the entire analysis period are mapped and reviewed. These should correspond to consistently wet locations or areas with limited climate variability. A large number of zero-output pixels in areas known to experience drought indicates a silent failure in the pipeline rather than a genuine absence of drought.
+
+5.  *Symmetric threshold test.* The algorithm is run with the start threshold set equal to the end threshold and event durations inspected. This checks that the termination logic does not produce infinite events (where the SPI never recovers above the start threshold) or zero-duration events (where onset and termination coincide in the same month).
+:::
+
+\newpage
+
+# Phase 2 {.unnumbered}
+
+Phase 1 produced a finalised pipeline that detects drought events for every grid cell using ERA5 data under different drought definition setups. Phase 2 extends the workflow to evaluate how drought characteristics differ across definitions and build the evidence needed to decide which one to use. Phase 2 also covers the ground-level validation of detected events against GWSC records and published drought documentation.
+
+## 2.1 Establishing and applying the reference period distribution {.unnumbered}
+
+Phase 2 introduces a fixed reference period to enable consistent comparison of drought characteristics across time. Rather than recalculating the distributional parameters from the full time series, we fix the Gamma (SPI) and log-logistic (SPEI) distribution parameters estimated from a defined reference period and apply them as a stable yardstick against which a later comparison period is evaluated.
+
+**Step 1: Define the reference and comparison periods**
+
+Two time periods are defined:
+
+- **Reference period** — 1970 to 2000, centred on 1985. The Gamma and log-logistic distribution parameters are estimated from ERA5 data covering this period only. These parameters define what constitutes normal hydroclimatic conditions and remain fixed throughout the analysis.
+
+- **Comparison period** — 2001 to 2020. SPI and SPEI values for this period are calculated by applying the reference period distribution parameters rather than refitting the distribution to the more recent data. This ensures that any shift in drought characteristics reflects a genuine change relative to the historical baseline rather than a change in the statistical reference frame. Note: the reference period ends in 2000 and the comparison period begins in 2001 — there is no overlap between the two periods.
+
+::: callout-note
+The WMO recommends a minimum of 30 years when estimating distributional parameters for drought indices. Our reference window of 1970–2000 (31 years) meets this recommendation and provides sufficient monthly observations per calendar month and accumulation period to reliably estimate Gamma and log-logistic distribution parameters at each grid cell. The pipeline is designed with full flexibility to redefine the reference period boundaries, and the final choice will be agreed with the project team.
+:::
+
+**Step 2: Estimate and store distribution parameters from the reference period**
+
+Using ERA5 precipitation and water balance data from the reference period (1970–2000), the Gamma distribution parameters ($\alpha$, $\beta$) for SPI and the log-logistic distribution parameters ($\alpha$, $\beta$, $\gamma$) for SPEI are estimated separately for each grid cell, calendar month, and accumulation period. These parameters are stored and carried forward as the fixed reference distribution and are not updated or re-estimated at any later stage of the analysis.
+
+**Step 3: Apply reference period parameters to the comparison period**
+
+The stored reference period parameters are applied to ERA5 data from the comparison period (2001–2020) to calculate SPI and SPEI values. Because the distributional parameters are held constant, the resulting index values express conditions in the comparison period as anomalies relative to the 1970–2000 baseline. A systematic shift towards more negative or positive SPI or SPEI values in the comparison period therefore reflects a genuine change in hydroclimatic conditions rather than a statistical artefact of the reference frame.
+
+## 2.2 Spatial aggregation and heterogeneity {.unnumbered}
+
+Drought events are detected at the individual grid cell level, producing a pixel-resolution record of drought occurrence across each country. To derive country-level summaries while preserving information about spatial variability, we apply a two-stage aggregation approach.
+
+**Step 1: Pixel-level summary**
+
+For each pixel and each year, the following characteristics are summarised across all detected drought events at that location:
+
+- **Frequency** — mean number of drought events per pixel per year
+- **Duration** — mean duration in months per event
+- **Severity** — mean peak SPI or SPEI value per event
+
+**Step 2: Country-level aggregation**
+
+The pixel-level annual summaries from Step 1 are averaged across all pixels within a country to produce country-level estimates. Averaging across pixels rather than summing ensures that country-level values remain comparable regardless of country size.
+
+::: callout-note
+Drought events are summarised annually — more data points per analysis period than decadal averages, which matters for the statistical tests used in the drought matrix evaluation. The one complication is cross-year events: a drought starting in November and ending in February belongs to two calendar years, so we have to pick one. We looked at four options: year of onset, year of termination, year of peak severity, or whichever year contains the most drought months. We went with termination year. That is when the drought ends and when communities have lived through the full impact. The pipeline can switch rules without much effort if the team decides differently. The annual resolution is specific to this evaluation stage. Once we see how different configurations cluster, we can adjust the aggregation timescale to whatever works best for the story team.
+:::
+
+**Step 3: Spatial heterogeneity measures**
+
+A single country-level mean does not capture whether drought conditions are spatially uniform or concentrated in particular sub-regions. Two countries may show identical mean drought frequency yet differ substantially in spatial structure: one with uniformly distributed drought risk and another with a pronounced dry north and wet south. This distinction matters for GWSC as it determines whether a country-wide or spatially targeted intervention is more appropriate.
+
+To capture this, the following spatial heterogeneity measures are retained alongside each country-level mean:
+
+- **Coefficient of variation (CV)** — the ratio of the standard deviation to the mean of pixel-level values across the country. A high CV indicates that drought characteristics vary substantially across pixels while a low CV indicates a spatially uniform signal.
+
+- **Percentage of pixels affected** — the proportion of pixels within a country that recorded at least one drought event in a given year, capturing the spatial extent of drought irrespective of its intensity at individual locations.
+
+Together these allow drought summaries to be reported as: *"Country X experienced on average Y events per pixel per year, with W% of pixels affected."* This communicates both the central tendency and the spatial spread of drought risk in a single statement.
+
+## 2.3 Evaluating drought definitions {.unnumbered}
+
+Having detected drought events under multiple configurations, we now evaluate whether those configurations produce meaningfully different results. Because the underlying SPI and SPEI time series are identical across all configurations, any differences in detected drought characteristics come entirely from the detection rules, not from the climate signal itself.
+
+The evaluation has two analyses, each answering a distinct question.
+
+### 2.3.1: Analysis 1 : Do definitions agree on drought characteristics? {.unnumbered}
+
+This analysis asks whether configurations behave consistently within the reference period (1970–2000). The full set of configurations tested is listed in Appendix A1. For each configuration, the five drought characteristics (frequency, duration, severity, CV, and percent area affected) are calculated annually across the reference period, giving one value per characteristic per year per configuration. These annual values are the input to the statistical tests below.
+
+**Step 1: Calibrate drought characteristics against operational classification rules**
+
+Before running statistical tests, all annual characteristics are calibrated against a common set of operational classification rules developed by GWSC's story team. This ensures the statistical evaluation reflects genuine operational differences rather than mathematical precision alone. Two configurations that produce numerically different values but fall within the same operational category after calibration are treated as equivalent.
+
+The calibration rules are as follows:
+
+- Frequency — if the annual value is greater than 0 but less than 1, it is classified as 1. This preserves the signal that drought occurred without reporting a fraction of an event. Values of 1 and above are rounded to the nearest whole number: values below X.5 round down, values of X.5 and above round up. For example, 0.3 and 0.8 both become 1, while 4.3 becomes 4 and 4.5 becomes 5. Zero remains zero: no drought detected.
+
+- Duration — rounded to the nearest whole number. Values below X.5 round down and values of X.5 and above round up. For example, 3.3 months becomes 3 months and 3.5 months becomes 4 months.
+
+- Severity — rounded to the nearest tenth. Values below X.049 round down and values of X.05 and above round up. For example, −1.44 becomes −1.4 while −1.45 becomes −1.5.
+
+- Coefficient of variation (CV) — rounded to the nearest 0.05. For example, a CV of 0.23 becomes 0.25 and a CV of 0.31 becomes 0.30.
+
+- Percent area affected — rounded to the nearest 5 percentage points. Values below X2.5% round down and values of X2.5% and above round up. For example, 42.4% becomes 40% and 42.5% becomes 45%.
+
+::: callout-note
+**Why the frequency floor matters statistically.** Annual drought frequency below 1 (e.g., 0.3 events per year) means roughly one drought every three years. That is a real signal. Rounding it to zero tells the statistical test that no drought occurred, which removes genuine variation from the rankings. Setting values between 0 and 1 to a floor of 1 preserves the presence of drought while keeping the metric on a whole-number scale that GWSC can use directly. The Friedman test itself is run on raw continuous annual values before any rounding, so the test retains full sensitivity regardless of how the outputs are later classified.
+
+An alternative sometimes considered is to aggregate annual values into decade averages before running the statistical test. The problem is that a 30-year reference period produces only three decade averages, and a 20-year comparison period produces two. The Friedman test works by ranking configurations within each time unit. With two or three time units, it has almost no statistical power and cannot reliably separate genuine configuration differences from random variation. Keeping annual values gives 30 and 20 observations respectively. That is the data density the test needs to work. Aggregating to decades removes it.
+:::
+
+::: callout-note
+**On the timing of calibration and implications for wider publication.** The calibration rules above are applied at two points in the workflow: once before the statistical test (as an operational sensitivity check for GWSC) and once after the test (for final reporting). For GWSC internal use, applying rounding before the test is defensible, as it ensures that only operationally meaningful differences drive the equivalence groupings. However, for external publication, applying rounding before the test introduces a dependency on GWSC-specific classification rules. A reviewer unfamiliar with those rules might ask: "Would different rounding thresholds produce different equivalence groups?" The answer is yes, which weakens the generalisability of the finding. For this reason, when communicating results beyond GWSC, the primary analysis should use raw continuous values as input to the Friedman test, with the GWSC calibration applied post-hoc for reporting only. Both approaches are documented here so the pipeline can support either context without modification.
+:::
+
+**Step 2: Test whether definitions produce systematically different results**
+
+With calibrated annual values in hand, the goal is to understand whether configurations are telling us different things or can be treated as interchangeable. Because all configurations respond to the same climate signal, a very dry year will show up as dry under every definition. The tests below account for this shared structure.
+
+*Level 1 — do the definitions actually disagree?*
+
+We apply a Friedman test to the annual values within the reference period for each characteristic. The test ranks configurations within each year and asks whether any configuration consistently occupies a higher or lower rank across all years.
+
+::: callout-note
+For example, if configuration A always produces the highest drought frequency and configuration B always produces the lowest, regardless of whether it is a wet or dry year, the test flags this as a significant and systematic difference. If rankings shuffle around with no consistent pattern, the test concludes that definitions are behaving equivalently.
+:::
+
+A non-significant result (p \> 0.05) means all definitions tell the same story and no further testing is needed. A significant result (p ≤ 0.05) means at least one definition is behaving differently and we move to Level 2.
+
+*Level 2 — which definitions are equivalent and which are not?*
+
+Where the Friedman test flags a difference, we apply a Nemenyi post-hoc test to identify which specific configuration pairs are statistically distinguishable.
+
+::: callout-note
+The Nemenyi test compares every possible pair of configurations against each other, asking whether the difference in their average ranks is large enough to be statistically significant or could have occurred by chance. It also corrects for the fact that many pairs are being compared simultaneously.
+:::
+
+Configurations that are not significantly different are grouped as equivalent and can be treated as interchangeable for GWSC use. Those in different groups represent a genuine definitional choice to be resolved with the project team.
+
+*Level 3 — do the definitions agree on which areas are most at risk?*
+
+Even if definitions agree in aggregate, they may disagree on which specific pixels, and therefore which communities, are most drought-prone. We assess this in two ways:
+
+- Spatial rank correlation — pixels are ranked by drought frequency under each configuration and we check whether those rankings are consistent across definitions. High correlation means definitions agree on where drought is worst even if their absolute values differ.
+
+- Hotspot agreement map — for each pixel we calculate what proportion of configurations classify it as a drought hotspot. Pixels where most or all configurations agree are robust hotspots. Pixels where definitions disagree are marked as uncertain in GWSC outputs.
+
+GWSC will prioritise definitions that capture a middle range of spatial extent, avoiding those that flag too much area (risking "crying wolf") or too little (missing impacts communities actually experience).
+
+### 2.3.2: Analysis 2: Do definitions agree on how drought has changed over time? {.unnumbered}
+
+This analysis asks whether all configurations tell the same story about how drought characteristics shifted between the reference period (1970–2000) and the comparison period (2001–2020).
+
+**Step 1: Calculate percentage change between periods**
+
+For each configuration and each characteristic, the period average is calculated for both the reference and comparison periods. Percentage change is then calculated as:
+
+$$\Delta X = \frac{X_{\text{comparison}} - X_{\text{reference}}}{X_{\text{reference}}} \times 100$$
+
+where $X$ represents any of the five characteristics. This gives a plain-language number useful for communicating results to the story team. For example: *"drought frequency increased by 20% between periods under configuration A."* It is a descriptive summary, not a statistical test.
+
+Two configurations can produce identical percentage change values while sitting in different equivalence groups from Analysis 1. Configuration A (reference mean frequency 1.0, comparison mean 1.5) and configuration B (reference mean 2.0, comparison mean 3.0) both show a 50% increase. Their absolute levels differ, and Analysis 1 flags that. But they agree on the direction and scale of change. When percentage change is consistent across configurations with different baselines, the observed climate shift is likely real rather than a product of which definition was chosen.
+
+**Step 2: Test whether definitions agree on the direction and magnitude of change**
+
+The Friedman test is run a second time, now on the 20 annual values from the comparison period (2001–2020).[^1] For each year, configurations are ranked by each drought characteristic from lowest to highest, producing a ranking table with 20 rows (one per year) and one column per configuration. Friedman asks whether any configuration consistently ranks higher or lower across those 20 years. This is a statistically valid test: 20 annual observations provide sufficient data points for the Friedman test to detect systematic differences between configurations.
+
+[^1]: The 20 annual observations here refer to the comparison period (2001–2020). Analysis 1 used 31 annual observations from the reference period (1970–2000). The two Friedman tests operate independently on their own period data and should not be confused. The cross-period rank comparison described later in this step is a descriptive summary, not a third statistical test.
+
+The cross-period comparison (checking whether rank order shifted between the reference and comparison periods) is a descriptive step, not a statistical test. Each Friedman runs within its own period. What comes out of each is one average rank per configuration. Comparing those two average ranks tells us whether the ordering changed, but with only two data points per configuration (one average rank per period), no formal test is applied. The interpretation is: did configuration A, which ranked first in the reference period, still rank first in the comparison period?
+
+If a configuration holds its rank across both periods, it is detecting drought consistently regardless of the climate context. If its rank shifts, it is responding differently to the more recent climate conditions, picking up relatively more or less drought than before compared to other configurations. A definition whose relative behaviour changes between periods is harder to interpret and less stable as an operational tool.
+
+The % change from Step 1 tells GWSC how much drought changed in plain numbers. Step 2 tells us whether all definitions agree on that change, or whether the answer shifts depending on which definition was chosen.
+
+**Step 3: Interpret results and select a recommended definition**
+
+By this point we know whether configurations produce statistically different drought characteristics within the reference period, which pairs are interchangeable and which are not, whether those differences show up spatially, and whether all definitions agree on how drought has changed over time. Together these form the basis of the project team discussion on which definition to carry forward. Where configurations are broadly equivalent the choice is largely operational. Where they diverge in ways that matter spatially or across time, that divergence is the primary decision point.
+
+## 2.4 Comparing SPI/SPEI drought characteristics with GWSC's existing drought metrics {.unnumbered}
+
+GWSC currently uses two precipitation-based drought metrics: consecutive dry days (CDD) and consecutive dry years (CDY). Both are absolute metrics that measure the length of dry spells without reference to local climatology. SPI and SPEI work differently, expressing how unusual a period is relative to historical norms at each pixel. CDD and CDY capture observed dryness; SPI and SPEI capture anomalous dryness. Where they agree, dry spells are both prolonged and climatologically unusual. Where they diverge, the divergence is itself informative about the local climate regime.
+
+We compare each of the five drought characteristics from Phase 2 against its closest CDD/CDY analogue.
+
+*Frequency.* A CDD event is defined as a run of consecutive dry days exceeding a fixed threshold. The number of such runs per pixel per year is the CDD-derived frequency, directly comparable to mean SPI/SPEI drought events per pixel per year. Spearman rank correlation across pixels tests whether both methods agree on which locations experience drought most often. The CDD threshold is tested at two or three values to confirm conclusions hold.
+
+*Duration.* Mean CDD run length in days is divided by 30 to convert to approximate months, putting it on the same scale as SPI/SPEI event duration. Spearman correlation between the two per pixel tests whether longer dry spells correspond to longer standardised drought events.
+
+*Severity.* CDD has no severity dimension - run length alone does not distinguish a near-threshold dry spell from a completely rainless period. The closest proxy is the total precipitation deficit accumulated during a dry run (sum of daily shortfall below the threshold), compared against mean peak SPI/SPEI per event using Spearman correlation. Agreement here is expected to be weaker than for frequency and duration.
+
+*Spatial heterogeneity (CV).* CV of CDD across pixels within a country is computed the same way as CV of SPI/SPEI drought frequency. CV(CDD) and CV(SPI frequency) are compared directly per country. Where both agree on high or low spatial heterogeneity, the spatial targeting conclusion is stable regardless of metric. Where they disagree, the choice of metric matters.
+
+*Percentage of pixels affected.* The percentage of pixels within a country exceeding the CDD event threshold in a given year is directly comparable to the SPI/SPEI percentage of pixels affected. Annual time series correlation per country tests whether both methods track the same year-to-year variation in drought extent.
+
+The comparisons are summarised in the table below.
+
+| Characteristic | CDD/CDY analogue | Comparison method | Caveat |
+|------------------|------------------|------------------|------------------|
+| Frequency | CDD events per pixel per year | Spearman correlation across pixels | Threshold-sensitive |
+| Duration | Mean CDD run length (days ÷ 30) | Spearman correlation across pixels | Unit conversion approximate |
+| Severity | Total precipitation deficit per run | Spearman correlation | CDD has no true severity dimension |
+| CV | CV of CDD across pixels | Direct comparison per country | None |
+| \% pixels affected | \% pixels exceeding CDD threshold per year | Annual correlation per country | Threshold-sensitive |
+
+\newpage
+
+# Appendix {.unnumbered}
+
+## A1. Drought detection configuration matrix {.unnumbered}
+
+All 45 configurations tested in Phase 2 are listed below. Each row is a unique combination of index, PET method, accumulation period, detection method, and threshold. Minimum duration is 1 month for all configurations.
+
+::: {.content-visible when-format="pdf"}
+\begingroup
+\fontsize{7.5}{8.5}\selectfont
+\begin{center}
+\begin{tabularx}{\textwidth}{llllll}
+\hline
+\textbf{Config ID} & \textbf{Index} & \textbf{PET method} & \textbf{Accum.} & \textbf{Method} & \textbf{Threshold} \\
+\hline
+S1-T-05  & SPI  & --              & 1 month  & Threshold  & $-$0.5 \\
+S1-T-10  & SPI  & --              & 1 month  & Threshold  & $-$1.0 \\
+S1-T-15  & SPI  & --              & 1 month  & Threshold  & $-$1.5 \\
+S1-C-05  & SPI  & --              & 1 month  & Cumulative & $-$0.5 \\
+S1-C-10  & SPI  & --              & 1 month  & Cumulative & $-$1.0 \\
+S1-C-15  & SPI  & --              & 1 month  & Cumulative & $-$1.5 \\
+S3-T-05  & SPI  & --              & 3 months & Threshold  & $-$0.5 \\
+S3-T-10  & SPI  & --              & 3 months & Threshold  & $-$1.0 \\
+S3-T-15  & SPI  & --              & 3 months & Threshold  & $-$1.5 \\
+S6-T-05  & SPI  & --              & 6 months & Threshold  & $-$0.5 \\
+S6-T-10  & SPI  & --              & 6 months & Threshold  & $-$1.0 \\
+S6-T-15  & SPI  & --              & 6 months & Threshold  & $-$1.5 \\
+S12-T-05 & SPI  & --              & 12 months & Threshold & $-$0.5 \\
+S12-T-10 & SPI  & --              & 12 months & Threshold & $-$1.0 \\
+S12-T-15 & SPI  & --              & 12 months & Threshold & $-$1.5 \\
+\hline
+ET1-T-05  & SPEI & Thornthwaite   & 1 month  & Threshold  & $-$0.5 \\
+ET1-T-10  & SPEI & Thornthwaite   & 1 month  & Threshold  & $-$1.0 \\
+ET1-T-15  & SPEI & Thornthwaite   & 1 month  & Threshold  & $-$1.5 \\
+ET1-C-05  & SPEI & Thornthwaite   & 1 month  & Cumulative & $-$0.5 \\
+ET1-C-10  & SPEI & Thornthwaite   & 1 month  & Cumulative & $-$1.0 \\
+ET1-C-15  & SPEI & Thornthwaite   & 1 month  & Cumulative & $-$1.5 \\
+ET3-T-05  & SPEI & Thornthwaite   & 3 months & Threshold  & $-$0.5 \\
+ET3-T-10  & SPEI & Thornthwaite   & 3 months & Threshold  & $-$1.0 \\
+ET3-T-15  & SPEI & Thornthwaite   & 3 months & Threshold  & $-$1.5 \\
+ET6-T-05  & SPEI & Thornthwaite   & 6 months & Threshold  & $-$0.5 \\
+ET6-T-10  & SPEI & Thornthwaite   & 6 months & Threshold  & $-$1.0 \\
+ET6-T-15  & SPEI & Thornthwaite   & 6 months & Threshold  & $-$1.5 \\
+ET12-T-05 & SPEI & Thornthwaite   & 12 months & Threshold & $-$0.5 \\
+ET12-T-10 & SPEI & Thornthwaite   & 12 months & Threshold & $-$1.0 \\
+ET12-T-15 & SPEI & Thornthwaite   & 12 months & Threshold & $-$1.5 \\
+\hline
+EP1-T-05  & SPEI & Penman-Monteith & 1 month  & Threshold  & $-$0.5 \\
+EP1-T-10  & SPEI & Penman-Monteith & 1 month  & Threshold  & $-$1.0 \\
+EP1-T-15  & SPEI & Penman-Monteith & 1 month  & Threshold  & $-$1.5 \\
+EP1-C-05  & SPEI & Penman-Monteith & 1 month  & Cumulative & $-$0.5 \\
+EP1-C-10  & SPEI & Penman-Monteith & 1 month  & Cumulative & $-$1.0 \\
+EP1-C-15  & SPEI & Penman-Monteith & 1 month  & Cumulative & $-$1.5 \\
+EP3-T-05  & SPEI & Penman-Monteith & 3 months & Threshold  & $-$0.5 \\
+EP3-T-10  & SPEI & Penman-Monteith & 3 months & Threshold  & $-$1.0 \\
+EP3-T-15  & SPEI & Penman-Monteith & 3 months & Threshold  & $-$1.5 \\
+EP6-T-05  & SPEI & Penman-Monteith & 6 months & Threshold  & $-$0.5 \\
+EP6-T-10  & SPEI & Penman-Monteith & 6 months & Threshold  & $-$1.0 \\
+EP6-T-15  & SPEI & Penman-Monteith & 6 months & Threshold  & $-$1.5 \\
+EP12-T-05 & SPEI & Penman-Monteith & 12 months & Threshold & $-$0.5 \\
+EP12-T-10 & SPEI & Penman-Monteith & 12 months & Threshold & $-$1.0 \\
+EP12-T-15 & SPEI & Penman-Monteith & 12 months & Threshold & $-$1.5 \\
+\hline
+\multicolumn{6}{p{\textwidth}}{\footnotesize Config ID: [Index][Accum]-[Method]-[Threshold$\times$10]. S = SPI, ET = SPEI-Thornthwaite, EP = SPEI-Penman-Monteith. T = Threshold, C = Cumulative. Cumulative method applies to 1-month configurations only. Minimum duration = 1 month for all configurations.} \\
+\end{tabularx}
+\end{center}
+\endgroup
+:::
+
+::: {.content-visible when-format="docx"}
+| Config ID | Index | PET Method | Accum. | Method | Threshold |
+|-----------|-------|------------|--------|--------|-----------|
+| S1-T-05 | SPI | -- | 1 month | Threshold | -0.5 |
+| S1-T-10 | SPI | -- | 1 month | Threshold | -1.0 |
+| S1-T-15 | SPI | -- | 1 month | Threshold | -1.5 |
+| S1-C-05 | SPI | -- | 1 month | Cumulative | -0.5 |
+| S1-C-10 | SPI | -- | 1 month | Cumulative | -1.0 |
+| S1-C-15 | SPI | -- | 1 month | Cumulative | -1.5 |
+| S3-T-05 | SPI | -- | 3 months | Threshold | -0.5 |
+| S3-T-10 | SPI | -- | 3 months | Threshold | -1.0 |
+| S3-T-15 | SPI | -- | 3 months | Threshold | -1.5 |
+| S6-T-05 | SPI | -- | 6 months | Threshold | -0.5 |
+| S6-T-10 | SPI | -- | 6 months | Threshold | -1.0 |
+| S6-T-15 | SPI | -- | 6 months | Threshold | -1.5 |
+| S12-T-05 | SPI | -- | 12 months | Threshold | -0.5 |
+| S12-T-10 | SPI | -- | 12 months | Threshold | -1.0 |
+| S12-T-15 | SPI | -- | 12 months | Threshold | -1.5 |
+| ET1-T-05 | SPEI | Thornthwaite | 1 month | Threshold | -0.5 |
+| ET1-T-10 | SPEI | Thornthwaite | 1 month | Threshold | -1.0 |
+| ET1-T-15 | SPEI | Thornthwaite | 1 month | Threshold | -1.5 |
+| ET1-C-05 | SPEI | Thornthwaite | 1 month | Cumulative | -0.5 |
+| ET1-C-10 | SPEI | Thornthwaite | 1 month | Cumulative | -1.0 |
+| ET1-C-15 | SPEI | Thornthwaite | 1 month | Cumulative | -1.5 |
+| ET3-T-05 | SPEI | Thornthwaite | 3 months | Threshold | -0.5 |
+| ET3-T-10 | SPEI | Thornthwaite | 3 months | Threshold | -1.0 |
+| ET3-T-15 | SPEI | Thornthwaite | 3 months | Threshold | -1.5 |
+| ET6-T-05 | SPEI | Thornthwaite | 6 months | Threshold | -0.5 |
+| ET6-T-10 | SPEI | Thornthwaite | 6 months | Threshold | -1.0 |
+| ET6-T-15 | SPEI | Thornthwaite | 6 months | Threshold | -1.5 |
+| ET12-T-05 | SPEI | Thornthwaite | 12 months | Threshold | -0.5 |
+| ET12-T-10 | SPEI | Thornthwaite | 12 months | Threshold | -1.0 |
+| ET12-T-15 | SPEI | Thornthwaite | 12 months | Threshold | -1.5 |
+| EP1-T-05 | SPEI | Penman-Monteith | 1 month | Threshold | -0.5 |
+| EP1-T-10 | SPEI | Penman-Monteith | 1 month | Threshold | -1.0 |
+| EP1-T-15 | SPEI | Penman-Monteith | 1 month | Threshold | -1.5 |
+| EP1-C-05 | SPEI | Penman-Monteith | 1 month | Cumulative | -0.5 |
+| EP1-C-10 | SPEI | Penman-Monteith | 1 month | Cumulative | -1.0 |
+| EP1-C-15 | SPEI | Penman-Monteith | 1 month | Cumulative | -1.5 |
+| EP3-T-05 | SPEI | Penman-Monteith | 3 months | Threshold | -0.5 |
+| EP3-T-10 | SPEI | Penman-Monteith | 3 months | Threshold | -1.0 |
+| EP3-T-15 | SPEI | Penman-Monteith | 3 months | Threshold | -1.5 |
+| EP6-T-05 | SPEI | Penman-Monteith | 6 months | Threshold | -0.5 |
+| EP6-T-10 | SPEI | Penman-Monteith | 6 months | Threshold | -1.0 |
+| EP6-T-15 | SPEI | Penman-Monteith | 6 months | Threshold | -1.5 |
+| EP12-T-05 | SPEI | Penman-Monteith | 12 months | Threshold | -0.5 |
+| EP12-T-10 | SPEI | Penman-Monteith | 12 months | Threshold | -1.0 |
+| EP12-T-15 | SPEI | Penman-Monteith | 12 months | Threshold | -1.5 |
+
+: Config ID: [Index][Accum]-[Method]-[Threshold×10]. S = SPI, ET = SPEI-Thornthwaite, EP = SPEI-Penman-Monteith. T = Threshold, C = Cumulative. Cumulative method applies to 1-month configurations only. Minimum duration = 1 month for all configurations.
+:::
+
+## A2. Visual inspection of detected drought events {.unnumbered}
+
+As part of the sanity checks described at the end of Phase 1, the data science team visually inspected detected drought events for a sample of pixels to confirm that the algorithm behaves as expected. @fig-event-example (Appendix A2) shows a representative output for a single pixel in Thailand (longitude 100.375°E, latitude 14.625°N), using SPI-6 with the threshold-entry method and a detection threshold of 0.0.
+
+The time series covers January to December 1990. Four events are detected: E29 (January, 1 month, Mild), E30 (April, 1 month, Mild), E31 (June, 4 months, Severe), and E32 (November, 1 month, Mild). The red dashed line marks the detection threshold (SPI = 0.0). A threshold of zero captures any negative anomaly, making it the most sensitive configuration tested. The algorithm correctly identifies each period below threshold as a discrete event, with severity determined by the minimum SPI value recorded during the event.
+
+```{r}
+#| label: fig-event-example
+#| fig-cap: "SPI-6 time series for a Thailand pixel (100.375°E, 14.625°N), January to December 1990. Threshold-entry detection method, threshold 0.0. Four events detected: E29 (Jan, 1 month, Mild), E30 (Apr, 1 month, Mild), E31 (Jun, 4 months, Severe), E32 (Nov, 1 month, Mild). Red dashed line marks the detection threshold at SPI = 0.0."
+#| echo: false
+#| out-width: "100%"
+knitr::include_graphics("Figures/full_series_02_SPI6_thr_ent_thr00_dur1_100.375_14.625_p14.png")
+```
+
+```{=html}
+<!---
+
+\newpage
+\textcolor{red}{Following needs to be reviewed by Caily \& Erin}
+
+
+# Phase 2 {.unnumbered}
+
+In Phase 2, the main goal is to establish a fixed historical reference period and apply the estimated distributional parameters to CMIP data, enabling a consistent comparison of drought characteristics between the observed historical climate and CMIP model projections.
+
+
+**Background — why a fixed reference period matters**
+
+When calculating SPI and SPEI, the resulting values are always expressed relative to a reference distribution — the definition of "normal" conditions. If the reference period is not fixed, drought characteristics calculated from ERA5 and CMIP data cannot be directly compared, because each dataset would be expressing anomalies relative to its own internal mean. By fixing the reference period using ERA5 observations, all subsequent analyses — whether applied to ERA5 evaluation data, CMIP historical runs, or CMIP future projections — are expressed against the same observed historical baseline. This makes cross-dataset comparisons scientifically defensible and directly meaningful for GWSC's operational context.
+
+
+**Reference period selection**
+
+We use ERA5 data to define the reference period. Two options were considered:
+
+a) ERA5 as reference — Gamma distribution parameters are estimated from ERA5 precipitation data over a fixed historical window. All SPI and SPEI values, whether derived from ERA5 or CMIP data, are then expressed as anomalies relative to this observed baseline. This approach ensures that drought severity is always interpreted in terms of what communities actually experienced historically, rather than what a climate model simulates as its own internal normal.
+
+b) CMIP historical as reference — Gamma distribution parameters are estimated separately from each CMIP model's own historical precipitation. While self-consistent within each model, this approach means each model uses a different baseline, making cross-model and ERA5-to-CMIP comparisons unreliable. This is the approach taken by Depsky et al. (2021) and is common in the literature, but is less appropriate for GWSC's use case where comparability to observed conditions is essential. Open for discussion.
+
+We adopt option (a) — ERA5 as the fixed reference — for the reasons outlined above.
+
+
+**Reference period length**
+
+The full ERA5 record (1975–2023) is first used to explore how drought identification performs across a long temporal window. This provides useful context for understanding broad patterns before the reference period is narrowed. For the fixed reference distribution, we use the period 1975–2010, which provides 36 years of monthly observations — exceeding the WMO minimum recommendation of 30 years — and ensures a sufficient number of data points per calendar month to reliably estimate Gamma distribution parameters. The remaining period (2011–2023) then serves as the evaluation window against which departures from the historical baseline can be assessed.
+
+
+**Step 1 — Calculate SPI and SPEI over the full ERA5 period**
+
+SPI and SPEI are calculated for the full ERA5 record (1975–2023) at each pixel and at accumulation periods of 1, 3, and 6 months, following the methods described in Phase 1. This full-period calculation provides a broad overview of drought patterns and serves as a baseline for comparing the effect of different reference period choices.
+
+**Step 2 — Fit and store Gamma distribution parameters from the reference period**
+
+Using only the ERA5 precipitation data from the reference period (1975–2010), a Gamma distribution is fitted separately for each pixel, calendar month, and accumulation period. The resulting shape ($α$) and scale ($β$) parameters are extracted and stored. These parameters define the fixed historical reference distribution and are not updated or re-estimated at any later stage of the analysis.
+
+
+# Phase 3 {.unnumbered}
+
+In Phase 3, the Gamma distribution parameters established from the ERA5
+reference period (1975–2010) in Phase 2 are applied to CMIP model data.
+The goal is to evaluate how well CMIP models reproduce observed historical
+drought characteristics, and to project how drought frequency, duration,
+and severity may change under future climate scenarios — all expressed
+against the same observed historical baseline.
+
+**Background — why ERA5 parameters are applied to CMIP data**
+
+Each CMIP model has its own internal precipitation climatology, which may
+differ systematically from observed conditions due to model biases. If SPI
+and SPEI were calculated using each model's own historical distribution as
+the reference, drought characteristics would be expressed relative to that
+model's internal normal rather than observed reality. By applying the fixed
+ERA5 reference parameters to all CMIP models, drought severity in both
+historical and future periods is always interpreted against what communities
+actually experienced — making the results operationally meaningful for GWSC
+and directly comparable across models and scenarios.
+
+**Step 1 — Apply ERA5 reference parameters to CMIP historical data**
+
+The Gamma distribution parameters stored in Phase 2 are applied to the
+CMIP historical precipitation data for each model, pixel, calendar month,
+and accumulation period. SPI and SPEI values are calculated following the
+same methods used in Phase 1, with the only difference being that the
+distributional parameters come from ERA5 observations rather than from
+each model's own data.
+
+This step serves as a model validation check. If a CMIP model accurately
+reproduces observed precipitation patterns, its SPI and SPEI values during
+the overlapping historical period should closely match those derived from
+ERA5. Systematic differences indicate model bias and are quantified before
+proceeding to future projections. Drought frequency, duration, and severity
+metrics derived from CMIP historical data are compared directly against
+ERA5 results to assess model performance.
+
+**Step 2 — Apply ERA5 reference parameters to CMIP future projections**
+
+The same ERA5 reference parameters are applied to CMIP future precipitation
+data across all available Shared Socioeconomic Pathway (SSP) scenarios.
+SPI and SPEI values are calculated for the future projection period using
+identical methods to those applied in Step 1, with the only difference
+being the input precipitation data.
+
+Because the reference distribution remains fixed throughout — anchored to
+ERA5 1975–2010 observations — drought events detected in future projections
+are directly comparable to those in the ERA5 historical record. This enables
+statements such as:
+
+> *"Under SSP5-8.5, drought frequency in 2071–2100 is projected to be*
+> *X times higher than the observed baseline of 1975–2010, and mean*
+> *drought duration is projected to increase by Y months."*
+
+Projections are assessed across three future periods — 2011–2040,
+2041–2070, and 2071–2100 — and across all available SSP scenarios to
+capture the range of possible futures under different emissions trajectories.
+
+**Step 3 — Detect drought events and compare characteristics
+across datasets and scenarios**
+
+With SPI and SPEI calculated consistently across ERA5, CMIP historical,
+and CMIP future datasets, the drought detection workflow from Phase 1 is
+applied uniformly to all datasets. Drought events are detected using the
+same configurations established in Phase 1 — the same thresholds,
+termination methods, and minimum duration rules — ensuring that any
+differences in detected drought characteristics reflect genuine changes
+in climate rather than methodological inconsistency.
+
+The following comparisons are made:
+
+- ERA5 reference (1975–2010) versus ERA5 evaluation (2011–2023) — to
+  establish whether observed drought characteristics have already changed
+  relative to the baseline.
+
+- CMIP historical versus ERA5 historical — to quantify model bias and
+  validate CMIP performance before projections are interpreted.
+
+- CMIP future (2011–2040, 2041–2070, 2071–2100) versus ERA5 reference
+  baseline — to project future changes in drought frequency, duration,
+  and severity under each SSP scenario.
+
+Results are summarised at the pixel level and aggregated to country level
+using the two-stage averaging approach established in Phase 1, enabling
+spatially explicit drought projections that are directly relevant to
+GWSC's country-level planning and adaptation work.
+
+--->
+```
