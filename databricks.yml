@@ -5,12 +5,18 @@
 bundle:
   name: Drought-indices
 
+sync:
+  include:
+    - "Codes/**"
+    - "*.qmd"
+    - "*.yml"
+
 targets:
   dev:
     default: true
     workspace:
       host: https://dbc-9c907c32-f434.cloud.databricks.com
-      root_path: /Shared/Drought-Project/Drought-indices
+      root_path: /Shared/Drought-Project
 
   ## Optionally, there could be 'staging' or 'prod' targets here.
   #
