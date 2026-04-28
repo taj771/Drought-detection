@@ -1,0 +1,105 @@
+---
+title: "00. MASTER RUN — Phase 1 Pipeline (Databricks)"
+output: html_document
+---
+
+# Phase 1 Pipeline — Databricks Cluster Run
+
+Run this notebook on Databricks cluster. Scripts sourced from workspace path.
+For local runs, use `00. MASTER_RUN.R` instead.
+
+```{r setup}
+# Databricks workspace path to Codes/ folder
+CODES_PATH <- "/Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes"
+```
+
+```{r packages}
+# pysparklyr not on CRAN — install from GitHub if missing
+if (!requireNamespace("pysparklyr", quietly = TRUE)) {
+  if (!requireNamespace("remotes", quietly = TRUE)) install.packages("remotes")
+  message("Installing pysparklyr from GitHub...")
+  remotes::install_github("mlverse/pysparklyr")
+}
+
+required_packages <- c(
+  "sparklyr", "dbplyr",
+  "dplyr", "purrr", "lubridate", "stringr", "tidyr",
+  "SPEI",
+  "terra", "sf",
+  "ecmwfr",
+  "rnaturalearth", "rnaturalearthdata",
+  "ggplot2", "ggpubr", "colorspace", "tidyterra", "patchwork",
+  "here", "modelsummary"
+)
+
+missing_packages <- required_packages[
+  !sapply(required_packages, requireNamespace, quietly = TRUE)
+]
+
+if (length(missing_packages) > 0) {
+  message(sprintf("Installing %d missing package(s): %s",
+                  length(missing_packages),
+                  paste(missing_packages, collapse = ", ")))
+  install.packages(missing_packages, dependencies = TRUE)
+} else {
+  message("All required packages already installed.")
+}
+```
+
+```{r run-flags}
+# Set TRUE/FALSE to control which steps execute
+RUN_SPI        <- TRUE   # Script 01: SPI calculation
+RUN_SPEI_T     <- TRUE   # Script 02a: SPEI Thornthwaite
+RUN_SPEI_P     <- TRUE   # Script 02b: SPEI Penman-Monteith
+RUN_DETECTION  <- TRUE   # Script 03: Drought detection
+```
+
+```{r step1-spi}
+if (RUN_SPI) {
+  message("================================================================")
+  message("STEP 1: SPI Calculation")
+  message("================================================================")
+  source(file.path(CODES_PATH, "01. SPI_Calculation.R"))
+}
+```
+
+```{r step2a-spei-thornthwaite}
+if (RUN_SPEI_T) {
+  message("================================================================")
+  message("STEP 2a: SPEI Calculation — Thornthwaite PET")
+  message("================================================================")
+  source(file.path(CODES_PATH, "02a. SPEI_Calculation_Thornthwaite.R"))
+}
+```
+
+```{r step2b-spei-penman}
+if (RUN_SPEI_P) {
+  message("================================================================")
+  message("STEP 2b: SPEI Calculation — Penman-Monteith PET")
+  message("  Requires: PET_data_prep/ steps completed first")
+  message("================================================================")
+  source(file.path(CODES_PATH, "02b. SPEI_Calculation_Penman.R"))
+}
+```
+
+```{r step3-detection}
+if (RUN_DETECTION) {
+  message("================================================================")
+  message("STEP 3: Drought Detection — All 45 Configurations")
+  message("================================================================")
+  source(file.path(CODES_PATH, "03. Drought_Detection.R"))
+}
+```
+
+```{r pipeline-complete}
+message("================================================================")
+message("PIPELINE COMPLETE")
+message("================================================================")
+message("Outputs saved to /Volumes/ or ./Data/:")
+if (RUN_SPI)       message("  spi_results.rds")
+if (RUN_SPEI_T)    message("  spei_thornthwaite_results.rds")
+if (RUN_SPEI_P)    message("  spei_penman_results.rds")
+if (RUN_DETECTION) message("  all_drought_events.rds")
+if (RUN_DETECTION) message("  drought_summary_yearly.csv")
+if (RUN_DETECTION) message("  drought_annual_summary.csv")
+```

@@ -43,5 +43,5 @@ resources:
         - task_key: run_pipeline
           existing_cluster_id: 0123-211315-fp4hw1e8
           notebook_task:
-            notebook_path: /Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes/00. MASTER_RUN
+            notebook_path: /Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes/00. MASTER_RUN_databricks
             source: WORKSPACE
