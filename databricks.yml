@@ -10,6 +10,9 @@ sync:
     - "Codes/**"
     - "*.qmd"
     - "*.yml"
+  exclude:
+    - ".vscode/**"
+    - ".databricks/**"
 
 targets:
   dev:

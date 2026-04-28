@@ -18,3 +18,6 @@ Data/
 #git commit -m "Stop tracking Data folder"
 #git push
 .positai
+
+.databricks
+.vscode
