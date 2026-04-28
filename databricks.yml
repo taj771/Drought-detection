@@ -7,7 +7,6 @@ bundle:
 
 targets:
   dev:
-    mode: development
     default: true
     workspace:
       host: https://dbc-9c907c32-f434.cloud.databricks.com
