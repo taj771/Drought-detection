@@ -11,6 +11,7 @@ targets:
     default: true
     workspace:
       host: https://dbc-9c907c32-f434.cloud.databricks.com
+      root_path: /Shared/projects/Drought-indices
 
   ## Optionally, there could be 'staging' or 'prod' targets here.
   #
