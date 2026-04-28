@@ -13,6 +13,14 @@ sync:
   exclude:
     - ".vscode/**"
     - ".databricks/**"
+    - "*_files/**"
+    - "*.html"
+    - "*.pdf"
+    - "*.docx"
+    - "*.tex"
+    - "*.png"
+    - "*.jpg"
+    - "typings/**"
 
 targets:
   dev:
