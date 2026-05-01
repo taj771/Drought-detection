@@ -403,15 +403,9 @@ pixel_list <- split(index_data, index_data$pixel_key)
 pixel_list <- lapply(pixel_list, function(d) d[order(d$date), ])
 message(sprintf("  %d unique pixels cached.\n", length(pixel_list)))
 
-n_cores <- max(1L, parallel::detectCores() - 1L)
-message(sprintf("Parallelising over %d cores (1 reserved for driver).\n", n_cores))
-
 overall_start <- Sys.time()
 
-# Run configs in parallel across driver cores.
-# pixel_list and config_table must be available in each worker — mclapply
-# forks the process so they are automatically inherited (no extra export needed).
-config_results <- parallel::mclapply(seq_len(nrow(config_table)), function(cfg_i) {
+config_results <- purrr::map(seq_len(nrow(config_table)), function(cfg_i) {
 
   cfg <- config_table[cfg_i, ]
 
@@ -465,7 +459,7 @@ config_results <- parallel::mclapply(seq_len(nrow(config_table)), function(cfg_i
                   format(nrow(pixel_events), big.mark = ",")))
 
   return(pixel_events)
-}, mc.cores = n_cores)
+})
 
 all_drought_events <- dplyr::bind_rows(config_results)
 
