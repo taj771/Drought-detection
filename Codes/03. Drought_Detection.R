@@ -405,7 +405,13 @@ message(sprintf("  %d unique pixels cached.\n", length(pixel_list)))
 
 overall_start <- Sys.time()
 
-config_results <- purrr::map(seq_len(nrow(config_table)), function(cfg_i) {
+# Write each config result to disk immediately to avoid accumulating all 75
+# configs in RAM simultaneously (causes OOM on driver node).
+tmp_dir <- file.path(VOLUME_PATH, "detection_tmp")
+dir.create(tmp_dir, showWarnings = FALSE, recursive = TRUE)
+message(sprintf("Temp dir for config chunks: %s\n", tmp_dir))
+
+for (cfg_i in seq_len(nrow(config_table))) {
 
   cfg <- config_table[cfg_i, ]
 
@@ -458,10 +464,18 @@ config_results <- purrr::map(seq_len(nrow(config_table)), function(cfg_i) {
   message(sprintf("  -> %s events detected",
                   format(nrow(pixel_events), big.mark = ",")))
 
-  return(pixel_events)
-})
+  # Write to disk immediately — don't hold all configs in RAM
+  chunk_file <- file.path(tmp_dir, paste0("cfg_", cfg$config_id, ".rds"))
+  saveRDS(pixel_events, chunk_file)
+  rm(pixel_events)
+  gc()
+}
 
-all_drought_events <- dplyr::bind_rows(config_results)
+# Read and combine all config chunks
+message("\nCombining config chunks from disk...")
+chunk_files <- list.files(tmp_dir, pattern = "^cfg_.*\\.rds$", full.names = TRUE)
+all_drought_events <- dplyr::bind_rows(lapply(chunk_files, readRDS))
+message(sprintf("Combined %d chunk files.", length(chunk_files)))
 
 elapsed <- round(difftime(Sys.time(), overall_start, units = "mins"), 1)
 message(sprintf("\n=== Detection complete in %.1f minutes ===", as.numeric(elapsed)))
