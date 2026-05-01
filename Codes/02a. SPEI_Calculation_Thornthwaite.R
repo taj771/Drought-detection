@@ -21,31 +21,21 @@
 
 
 # -- Libraries ----------------------------------------------------------------
-library(here)
 library(sparklyr)
 library(dplyr)
 library(dbplyr)
-library(ggplot2)
-library(colorspace)
-library(tidyterra)
-library(terra)
-library(ggpubr)
 library(tidyr)
 library(stringr)
 library(lubridate)
-library(modelsummary)
 library(SPEI)
 
 
 # -- Databricks connection ----------------------------------------------------
-sc <- spark_connect(
-  cluster_id = Sys.getenv("DATABRICKS_CLUSTER_ID"),
-  method = "databricks_connect"
-)
+sc <- spark_connect(method = "databricks")
 
 
 # -- Data source --------------------------------------------------------------
-# Analysis Plan §1.2 Step 1: same ERA5 daily table as Script 01.
+# Analysis Plan Section 1.2 Step 1: same ERA5 daily table as Script 01.
 # Requires both precip and mean_temp (used for Thornthwaite PET).
 project_folder <- "xx_drought_index"
 
@@ -69,7 +59,7 @@ era5_normals %>%
 
 
 # -- Daily → monthly aggregation (runs in Spark) ------------------------------
-# Analysis Plan §1.2 Step 1: aggregate daily precip and temperature to monthly.
+# Analysis Plan Section 1.2 Step 1: aggregate daily precip and temperature to monthly.
 # mean_temp_monthly is required for Thornthwaite PET calculation (Step 2).
 # NOTE: Verify ERA5 mean_temp units. ERA5 raw = Kelvin; convert to °C if needed
 #       (thornthwaite() requires °C). Check with: range(monthly_r$mean_temp_monthly)
@@ -97,7 +87,7 @@ monthly_r <- monthly_spark %>% collect()
 
 
 # -- Step 2 + 5–7: SPEI calculator for a single pixel ------------------------
-# Analysis Plan §1.2 Steps 2, 5, 6, 7:
+# Analysis Plan Section 1.2 Steps 2, 5, 6, 7:
 #   Step 2: Water balance = Precip - PET (Thornthwaite)
 #   Step 5: Fit log-logistic distribution (handles negative WB; Gamma cannot)
 #   Step 6: Cumulative probability from log-logistic
@@ -135,7 +125,7 @@ safe_spei <- function(precip_vec, temp_vec, lat, scale = 3) {
 
 
 # -- Step 3 + 4: Apply SPEI at all four accumulation periods ------------------
-# Analysis Plan §1.2 Steps 3–4: four accumulation periods (1, 3, 6, 12 months).
+# Analysis Plan Section 1.2 Steps 3–4: four accumulation periods (1, 3, 6, 12 months).
 #
 # SPEI-1  → single-month water balance anomaly; flash drought onset
 # SPEI-3  → 3-month rolling WB; seasonal drought
@@ -182,4 +172,5 @@ message("SPEI (Thornthwaite) calculation complete!")
 
 # -- Save output --------------------------------------------------------------
 # spei_thornthwaite_results.rds feeds into Script 03 alongside spi_results.rds and spei_penman_results.rds.
-saveRDS(spei_results, "./Data/spei_thornthwaite_results.rds")
+VOLUME_PATH <- "/Volumes/projects/gwsc_drought/drought_outputs"
+saveRDS(spei_results, file.path(VOLUME_PATH, "spei_thornthwaite_results.rds"))

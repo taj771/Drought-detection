@@ -14,44 +14,22 @@ CODES_PATH <- "/Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes"
 ```
 
 ```{r packages}
-# pysparklyr not on CRAN — install from GitHub if missing
-if (!requireNamespace("pysparklyr", quietly = TRUE)) {
-  if (!requireNamespace("remotes", quietly = TRUE)) install.packages("remotes")
-  message("Installing pysparklyr from GitHub...")
-  remotes::install_github("mlverse/pysparklyr")
-}
-
-required_packages <- c(
-  "sparklyr", "dbplyr",
-  "dplyr", "purrr", "lubridate", "stringr", "tidyr",
-  "SPEI",
-  "terra", "sf",
-  "ecmwfr",
-  "rnaturalearth", "rnaturalearthdata",
-  "ggplot2", "ggpubr", "colorspace", "tidyterra", "patchwork",
-  "here", "modelsummary"
-)
-
-missing_packages <- required_packages[
-  !sapply(required_packages, requireNamespace, quietly = TRUE)
-]
-
-if (length(missing_packages) > 0) {
-  message(sprintf("Installing %d missing package(s): %s",
-                  length(missing_packages),
-                  paste(missing_packages, collapse = ", ")))
-  install.packages(missing_packages, dependencies = TRUE)
-} else {
-  message("All required packages already installed.")
-}
+# SPEI installed as cluster library via Databricks UI (Libraries tab).
+# No install.packages needed — cluster carries it across all runs.
+stopifnot(requireNamespace("SPEI", quietly = TRUE))
+message("SPEI available on cluster.")
 ```
 
 ```{r run-flags}
-# Set TRUE/FALSE to control which steps execute
-RUN_SPI        <- TRUE   # Script 01: SPI calculation
-RUN_SPEI_T     <- TRUE   # Script 02a: SPEI Thornthwaite
-RUN_SPEI_P     <- TRUE   # Script 02b: SPEI Penman-Monteith
+RUN_SPI        <- FALSE  # Script 01: SPI calculation — DONE, output in Volume
+RUN_SPEI_T     <- FALSE  # Script 02a: SPEI Thornthwaite — DONE
+RUN_SPEI_P     <- FALSE  # Script 02b: SPEI Penman-Monteith — DONE, 1970-2023
 RUN_DETECTION  <- TRUE   # Script 03: Drought detection
+RUN_SANITY     <- FALSE  # Script 04: Sanity checks
+RUN_REF_PARAMS <- FALSE  # Script 05: Freeze reference period params
+RUN_FRIEDMAN   <- FALSE  # Script 06: Analysis 1 — Friedman + Nemenyi
+RUN_CROSSPERIOD <- FALSE # Script 07: Analysis 2 — cross-period comparison
+RUN_APPENDIX   <- FALSE  # Script 08: Appendix A1 figure
 ```
 
 ```{r step1-spi}
@@ -91,15 +69,68 @@ if (RUN_DETECTION) {
 }
 ```
 
+```{r step4-sanity}
+if (RUN_SANITY) {
+  message("================================================================")
+  message("STEP 4: Sanity Checks")
+  message("================================================================")
+  source(file.path(CODES_PATH, "04. Sanity_Checks.R"))
+}
+```
+
+```{r step5-ref-params}
+if (RUN_REF_PARAMS) {
+  message("================================================================")
+  message("STEP 5: Reference Period Parameters (1970–2000)")
+  message("================================================================")
+  source(file.path(CODES_PATH, "05. Reference_Period_Params.R"))
+}
+```
+
+```{r step6-friedman}
+if (RUN_FRIEDMAN) {
+  message("================================================================")
+  message("STEP 6: Analysis 1 — Friedman + Nemenyi")
+  message("================================================================")
+  source(file.path(CODES_PATH, "06. Analysis1_Friedman.R"))
+}
+```
+
+```{r step7-crossperiod}
+if (RUN_CROSSPERIOD) {
+  message("================================================================")
+  message("STEP 7: Analysis 2 — Cross-Period Comparison")
+  message("================================================================")
+  source(file.path(CODES_PATH, "07. Analysis2_CrossPeriod.R"))
+}
+```
+
+```{r step8-appendix}
+if (RUN_APPENDIX) {
+  message("================================================================")
+  message("STEP 8: Appendix A1 Figure")
+  message("================================================================")
+  source(file.path(CODES_PATH, "08. AppendixA1_Figure.R"))
+}
+```
+
 ```{r pipeline-complete}
 message("================================================================")
 message("PIPELINE COMPLETE")
 message("================================================================")
 message("Outputs saved to /Volumes/ or ./Data/:")
-if (RUN_SPI)       message("  spi_results.rds")
-if (RUN_SPEI_T)    message("  spei_thornthwaite_results.rds")
-if (RUN_SPEI_P)    message("  spei_penman_results.rds")
-if (RUN_DETECTION) message("  all_drought_events.rds")
-if (RUN_DETECTION) message("  drought_summary_yearly.csv")
-if (RUN_DETECTION) message("  drought_annual_summary.csv")
+if (RUN_SPI)         message("  spi_results.rds")
+if (RUN_SPEI_T)      message("  spei_thornthwaite_results.rds")
+if (RUN_SPEI_P)      message("  spei_penman_results.rds")
+if (RUN_DETECTION)   message("  all_drought_events.rds")
+if (RUN_DETECTION)   message("  drought_summary_yearly.csv")
+if (RUN_DETECTION)   message("  drought_annual_summary.csv")
+if (RUN_REF_PARAMS)  message("  era5_gamma_params_ref1970_1999.rds")
+if (RUN_REF_PARAMS)  message("  era5_loglogistic_params_ref1970_1999.rds")
+if (RUN_FRIEDMAN)    message("  analysis1_friedman_results.rds")
+if (RUN_FRIEDMAN)    message("  analysis1_nemenyi_pairs.rds")
+if (RUN_FRIEDMAN)    message("  analysis1_equivalence_groups.rds")
+if (RUN_CROSSPERIOD) message("  analysis2_pct_change.rds")
+if (RUN_CROSSPERIOD) message("  analysis2_rank_stability.rds")
+if (RUN_APPENDIX)    message("  Figures/appendix_a1_event_inspection.png")
 ```

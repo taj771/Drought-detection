@@ -41,7 +41,7 @@ library(SPEI)
 # =============================================================================
 
 # Clipped PET files from Script 05 — must be resampled to ERA5 0.25 deg grid
-pet_dir <- "./data/era5land_pet/clipped_era5grid/"
+pet_dir <- "/Volumes/projects/gwsc_drought/drought_outputs/pet_clipped/"
 
 # Databricks catalog — must match Scripts 01/02a
 project_folder <- "xx_drought_index"
@@ -49,46 +49,21 @@ catalog_name   <- "projects"
 
 # Year range for PET files (must match YEARS used in Script 03)
 pet_year_start <- 1970
-pet_year_end   <- 2000
+pet_year_end   <- 2023
 
 # =============================================================================
 
 
 # -- Databricks connection ----------------------------------------------------
-sc <- spark_connect(
-  cluster_id = Sys.getenv("DATABRICKS_CLUSTER_ID"),
-  method     = "databricks_connect"
-)
-
-
-# -- Step 1: Load ERA5 monthly precipitation from Databricks ------------------
-# Analysis Plan §1.2 Step 1: same ERA5 daily table as Scripts 01/02a.
-# Aggregates daily → monthly in Spark before pulling to R.
-era5_normals <- tbl(sc, in_catalog(catalog_name, project_folder,
-                                   "drought_index_dailysummary"))
-
-monthly_spark <- era5_normals |>
-  group_by(x, y, year, month) |>
-  summarise(
-    monthly_precip = sum(precip, na.rm = TRUE),
-    n_days_missing = sum(as.integer(is.na(precip))),
-    .groups        = "drop"
-  ) |>
-  filter(n_days_missing < 5) |>
-  arrange(x, y, year, month)
-
-monthly_r <- monthly_spark |> collect()
-
-message(sprintf("ERA5 precip loaded: %s rows, %d pixels",
-                format(nrow(monthly_r), big.mark = ","),
-                n_distinct(paste(monthly_r$x, monthly_r$y))))
+sc <- spark_connect(method = "databricks")
 
 
 # -- Step 2a: Load clipped Penman-Monteith PET from NC files ------------------
+# PET loaded first — pixel coords used to filter ERA5 in Spark (avoids OOM).
 # PET prepared in Scripts 03–05: downloaded from ERA5-Land, converted to
 # mm/month, resampled from 0.10 deg → 0.25 deg, clipped to ERA5 extent.
 # All NC files in pet_dir are loaded and combined into one long-format table.
-pet_files <- list.files(pet_dir, pattern = "\\.nc$", full.names = TRUE)
+pet_files <- list.files(pet_dir, pattern = "1970_2023.*\\.nc$", full.names = TRUE)
 
 if (length(pet_files) == 0) {
   stop(sprintf("No PET NC files found in: %s\nRun Scripts 03-05 first.", pet_dir))
@@ -135,14 +110,46 @@ message(sprintf("PET loaded: %s rows, %d pixels",
                 n_distinct(paste(pet_r$x, pet_r$y))))
 
 
+# -- Step 1: Load ERA5 monthly precipitation from Databricks ------------------
+# Analysis Plan Section 1.2 Step 1: ERA5 daily table aggregated to monthly.
+# Filter in Spark to only pixels present in PET files before collect() —
+# avoids pulling all ~10993 global pixels into R (OOM fix).
+pet_r$x <- round(pet_r$x, 4)
+pet_r$y <- round(pet_r$y, 4)
+
+pet_pixels_sdf <- copy_to(
+  sc,
+  unique(pet_r[, c("x", "y")]),
+  name      = "pet_pixels",
+  overwrite = TRUE
+)
+
+era5_normals <- tbl(sc, in_catalog(catalog_name, project_folder,
+                                   "drought_index_dailysummary"))
+
+monthly_spark <- era5_normals |>
+  group_by(x, y, year, month) |>
+  summarise(
+    monthly_precip = sum(precip, na.rm = TRUE),
+    n_days_missing = sum(as.integer(is.na(precip))),
+    .groups        = "drop"
+  ) |>
+  filter(n_days_missing < 5) |>
+  inner_join(pet_pixels_sdf, by = c("x", "y")) |>
+  arrange(x, y, year, month)
+
+monthly_r <- monthly_spark |> collect()
+
+message(sprintf("ERA5 precip loaded: %s rows, %d pixels",
+                format(nrow(monthly_r), big.mark = ","),
+                n_distinct(paste(monthly_r$x, monthly_r$y))))
+
+
 # -- Step 2b: Join PET to ERA5 precipitation on x, y, year, month ------------
-# Analysis Plan §1.2 Step 2: water balance = precip - PET.
-# Round coordinates to 4 decimal places before joining to avoid floating point
-# mismatch between ERA5 and ERA5-Land grids after resampling.
+# Analysis Plan Section 1.2 Step 2: water balance = precip - PET.
+# Coordinates already rounded to 4dp in Step 1 — join directly.
 monthly_r$x <- round(monthly_r$x, 4)
 monthly_r$y <- round(monthly_r$y, 4)
-pet_r$x     <- round(pet_r$x, 4)
-pet_r$y     <- round(pet_r$y, 4)
 
 monthly_pet <- merge(monthly_r, pet_r, by = c("x", "y", "year", "month"))
 
@@ -161,7 +168,7 @@ monthly_pet$water_balance <- monthly_pet$monthly_precip - monthly_pet$pet_mm
 
 
 # -- Steps 5–7: SPEI calculator for a single pixel ---------------------------
-# Analysis Plan §1.2 Steps 5–7:
+# Analysis Plan Section 1.2 Steps 5–7:
 #   Step 5: Fit log-logistic distribution (handles negative WB; Gamma cannot)
 #   Step 6: Cumulative probability from log-logistic
 #   Step 7: Transform to standard normal z-score (SPEI)
@@ -184,7 +191,7 @@ safe_spei_penman <- function(wb_vec, scale = 3) {
 
 
 # -- Steps 3 + 4: Apply SPEI at all four accumulation periods ----------------
-# Analysis Plan §1.2 Steps 3–4: four accumulation periods (1, 3, 6, 12 months).
+# Analysis Plan Section 1.2 Steps 3–4: four accumulation periods (1, 3, 6, 12 months).
 #
 # SPEI-1  → single-month WB anomaly; flash drought onset
 # SPEI-3  → 3-month rolling WB; seasonal drought
@@ -231,4 +238,5 @@ message("SPEI (Penman-Monteith) calculation complete!")
 # -- Save output --------------------------------------------------------------
 # spei_penman_results.rds feeds into drought detection alongside
 # spi_results.rds and spei_results.rds (Thornthwaite).
-saveRDS(spei_penman_results, "./Data/spei_penman_results.rds")
+VOLUME_PATH <- "/Volumes/projects/gwsc_drought/drought_outputs"
+saveRDS(spei_penman_results, file.path(VOLUME_PATH, "spei_penman_results.rds"))

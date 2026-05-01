@@ -2,7 +2,7 @@
 # 00. MASTER RUN SCRIPT — Phase 1 Pipeline
 # =============================================================================
 # Analysis Plan Reference: Phase 1 — Full workflow from raw ERA5 data to
-#   detected drought events under all 45 configurations (Appendix A1).
+#   detected drought events under all 75 configurations (Appendix A1).
 #
 # RUN ORDER:
 #   Prerequisites (run once, local machine):
@@ -14,7 +14,7 @@
 #     01. SPI_Calculation.R                 — SPI-1/3/6/12 for all pixels
 #     02a. SPEI_Calculation_Thornthwaite.R  — SPEI-1/3/6/12, Thornthwaite PET
 #     02b. SPEI_Calculation_Penman.R        — SPEI-1/3/6/12, Penman-Monteith PET
-#     03. Drought_Detection.R               — detect events, all 45 configs
+#     03. Drought_Detection.R               — detect events, all 75 configs
 #
 # OUTPUTS (saved to ./Data/):
 #   spi_results.rds
@@ -113,6 +113,11 @@ RUN_SPI        <- TRUE   # Script 01: SPI calculation
 RUN_SPEI_T     <- TRUE   # Script 02a: SPEI Thornthwaite
 RUN_SPEI_P     <- TRUE   # Script 02b: SPEI Penman-Monteith (requires PET prep)
 RUN_DETECTION  <- TRUE   # Script 03: Drought detection (requires 01 + 02a/02b)
+RUN_SANITY     <- TRUE   # Script 04: Sanity checks
+RUN_REF_PARAMS <- TRUE   # Script 05: Freeze reference period params
+RUN_FRIEDMAN   <- TRUE   # Script 06: Analysis 1 — Friedman + Nemenyi
+RUN_CROSSPERIOD <- TRUE  # Script 07: Analysis 2 — cross-period comparison
+RUN_APPENDIX   <- TRUE   # Script 08: Appendix A1 figure
 
 # =============================================================================
 
@@ -148,13 +153,56 @@ if (RUN_DETECTION) {
   source("03. Drought_Detection.R")
 }
 
+if (RUN_SANITY) {
+  message("\n================================================================")
+  message("STEP 4: Sanity Checks")
+  message("================================================================\n")
+  source("04. Sanity_Checks.R")
+}
+
+if (RUN_REF_PARAMS) {
+  message("\n================================================================")
+  message("STEP 5: Reference Period Parameters (1970–1999)")
+  message("================================================================\n")
+  source("05. Reference_Period_Params.R")
+}
+
+if (RUN_FRIEDMAN) {
+  message("\n================================================================")
+  message("STEP 6: Analysis 1 — Friedman + Nemenyi")
+  message("================================================================\n")
+  source("06. Analysis1_Friedman.R")
+}
+
+if (RUN_CROSSPERIOD) {
+  message("\n================================================================")
+  message("STEP 7: Analysis 2 — Cross-Period Comparison")
+  message("================================================================\n")
+  source("07. Analysis2_CrossPeriod.R")
+}
+
+if (RUN_APPENDIX) {
+  message("\n================================================================")
+  message("STEP 8: Appendix A1 Figure")
+  message("================================================================\n")
+  source("08. AppendixA1_Figure.R")
+}
+
 message("\n================================================================")
 message("PIPELINE COMPLETE")
 message("================================================================")
-message("Outputs saved to ./Data/:")
-if (RUN_SPI)       message("  spi_results.rds")
-if (RUN_SPEI_T)    message("  spei_thornthwaite_results.rds")
-if (RUN_SPEI_P)    message("  spei_penman_results.rds")
-if (RUN_DETECTION) message("  all_drought_events.rds")
-if (RUN_DETECTION) message("  drought_summary_yearly.csv")
-if (RUN_DETECTION) message("  drought_annual_summary.csv")
+message("Outputs saved to ./Data/ and VOLUME_PATH:")
+if (RUN_SPI)         message("  spi_results.rds")
+if (RUN_SPEI_T)      message("  spei_thornthwaite_results.rds")
+if (RUN_SPEI_P)      message("  spei_penman_results.rds")
+if (RUN_DETECTION)   message("  all_drought_events.rds")
+if (RUN_DETECTION)   message("  drought_summary_yearly.csv")
+if (RUN_DETECTION)   message("  drought_annual_summary.csv")
+if (RUN_REF_PARAMS)  message("  era5_gamma_params_ref1970_1999.rds")
+if (RUN_REF_PARAMS)  message("  era5_loglogistic_params_ref1970_1999.rds")
+if (RUN_FRIEDMAN)    message("  analysis1_friedman_results.rds")
+if (RUN_FRIEDMAN)    message("  analysis1_nemenyi_pairs.rds")
+if (RUN_FRIEDMAN)    message("  analysis1_equivalence_groups.rds")
+if (RUN_CROSSPERIOD) message("  analysis2_pct_change.rds")
+if (RUN_CROSSPERIOD) message("  analysis2_rank_stability.rds")
+if (RUN_APPENDIX)    message("  Figures/appendix_a1_event_inspection.png")

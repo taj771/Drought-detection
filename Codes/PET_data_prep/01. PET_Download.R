@@ -50,10 +50,10 @@ COUNTRY_NAMES <- c(
   "Benin"
 )
 
-# Analysis Plan §1.2 Step 1: reference period 1970–2000 for distribution fitting.
+# Analysis Plan Section 1.2 Step 1: full period 1970–2023.
+# Covers reference period (1970–1999) + comparison period (2000–2020) + buffer to 2023.
 # ERA5-Land available from 1950 onward.
-# Extend beyond reference period if full validation period needed (e.g. 1970–2023).
-YEARS      <- as.character(1970:2000)
+YEARS      <- as.character(1970:2023)
 MONTHS     <- sprintf("%02d", 1:12)
 OUTPUT_DIR <- "./data/era5land_pet/"
 
@@ -157,12 +157,23 @@ download_pet <- function(country_info) {
     target             = fname
   )
 
-  wf_request(
-    request  = request,
-    transfer = TRUE,
-    path     = OUTPUT_DIR,
-    verbose  = TRUE
-  )
+  # Retry up to 3 times with backoff — CDS API v2 rate limits polling
+  for (attempt in 1:3) {
+    result <- tryCatch({
+      wf_request(
+        request  = request,
+        transfer = TRUE,
+        path     = OUTPUT_DIR,
+        verbose  = TRUE
+      )
+      "ok"
+    }, error = function(e) {
+      message(sprintf("[RETRY] attempt %d failed: %s", attempt, e$message))
+      if (attempt < 3) Sys.sleep(30 * attempt)
+      "error"
+    })
+    if (result == "ok") break
+  }
 
   if (file.exists(fpath)) {
     r <- rast(fpath)
@@ -180,6 +191,7 @@ message("\n=== Starting downloads ===\n")
 
 for (nm in names(COUNTRIES)) {
   download_pet(COUNTRIES[[nm]])
+  Sys.sleep(10)   # pause between country requests — avoid CDS rate limit
 }
 
 message("\n=== Downloads complete ===")

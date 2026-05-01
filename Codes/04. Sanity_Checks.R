@@ -1,7 +1,7 @@
 # =============================================================================
 # 04. Sanity Checks — Drought Detection Algorithm Verification
 # =============================================================================
-# Analysis Plan Reference: Phase 1 §1.3 — Algorithm sanity checks (5 checks)
+# Analysis Plan Reference: Phase 1 1.3 — Algorithm sanity checks (5 checks)
 #
 # Check 1: Visual event inspection
 #   Random sample of detected events plotted as time series with threshold line,

@@ -74,9 +74,10 @@ library(lubridate)
 # =============================================================================
 
 # -- Data paths ---------------------------------------------------------------
-spi_path          <- "./Data/spi_results.rds"
-spei_thornthwaite_path <- "./Data/spei_thornthwaite_results.rds"
-spei_penman_path  <- "./Data/spei_penman_results.rds"   # set NULL if not ready
+VOLUME_PATH            <- "/Volumes/projects/gwsc_drought/drought_outputs"
+spi_path               <- file.path(VOLUME_PATH, "spi_results.rds")
+spei_thornthwaite_path <- file.path(VOLUME_PATH, "spei_thornthwaite_results.rds")
+spei_penman_path       <- file.path(VOLUME_PATH, "spei_penman_results.rds")   # set NULL if not ready
 
 # -- Country filter -----------------------------------------------------------
 # List countries to include. Set to NULL to use ALL available pixels.
@@ -85,13 +86,12 @@ COUNTRY_FILTER <- c("Argentina", "Benin", "Thailand", "Greece", "Mexico", "South
 # COUNTRY_FILTER <- NULL   # ← uncomment to run on all available pixels
 
 # -- Year range filter --------------------------------------------------------
-# Analysis Plan reference period: 1970–2000.
-# Extend to 1970–2023 for full validation period.
+# Full period: reference (1970–1999) + comparison (2000–2020) + buffer to 2023.
 YEAR_FROM <- 1970
-YEAR_TO   <- 2000
+YEAR_TO   <- 2023
 
 # -- Configuration ranges -----------------------------------------------------
-# These define the 45 configurations in Appendix A1 of the analysis plan.
+# These define the 75 configurations in Appendix A1 of the analysis plan.
 # Edit these vectors to add/remove configurations.
 #
 # INDICES: which index columns to detect drought on.
@@ -100,13 +100,15 @@ YEAR_TO   <- 2000
 #   SPEI (Penman):       spei1_pm, spei3_pm, spei6_pm, spei12_pm
 #     (Penman columns only present if spei_penman_path is not NULL)
 #
-# METHODS: two detection methods (analysis plan §1.3 Step 2):
+# METHODS: two detection methods (analysis plan Section 1.3 Step 2):
 #   "threshold"  — drought ends when index recovers above start threshold
 #   "cumulative" — drought ends when cumulative sum >= 0
 #                  NOTE: cumulative method only valid for scale-1 indices
 #                  (spi1, spei1, spei1_pm). Applied automatically below.
 #
 # START_THRESHOLDS: onset threshold values.
+#    0.0 = Any negative anomaly entry
+#   -0.25 = Near-normal drought entry
 #   -0.5 = Mild drought entry
 #   -1.0 = Moderate drought entry
 #   -1.5 = Severe drought entry
@@ -117,14 +119,14 @@ YEAR_TO   <- 2000
 INDICES          <- c("spi1", "spi3", "spi6", "spi12",
                       "spei1", "spei3", "spei6", "spei12")
 METHODS          <- c("threshold", "cumulative")
-START_THRESHOLDS <- c(-0.5, -1.0, -1.5)
+START_THRESHOLDS <- c(0.0, -0.25, -0.5, -1.0, -1.5)
 MIN_DURATION     <- 1   # fixed at 1 per analysis plan (Appendix A1)
 
 # =============================================================================
 
 
 # -- Step 1: Load and prepare SPI/SPEI data -----------------------------------
-# Analysis Plan §1.3 Step 1: Load pixel-level monthly SPI/SPEI values.
+# Analysis Plan Section 1.3 Step 1: Load pixel-level monthly SPI/SPEI values.
 # Join SPI and SPEI tables on x, y, year, month.
 # Optionally filter by country and year range.
 message("=== Step 1: Loading index data ===\n")
@@ -190,7 +192,7 @@ cat(sprintf("Indices      : %s\n\n", paste(INDICES, collapse = ", ")))
 
 
 # -- Step 2: Build configuration table ----------------------------------------
-# Analysis Plan §1.3 Step 2: all combinations of index × method × threshold.
+# Analysis Plan Section 1.3 Step 2: all combinations of index × method × threshold.
 # Scale-1 indices (spi1, spei1, spei1_pm) run both methods.
 # Scale-3/6/12 indices run threshold method only (accumulation window already
 # provides temporal persistence — cumulative not applicable).
@@ -220,10 +222,10 @@ configs_longer <- expand.grid(
 config_table <- rbind(configs_scale1, configs_longer)
 
 # Auto-generate Config ID matching Appendix A1 naming convention:
-# [Index prefix][Scale]-[Method code]-[Threshold x 10]
-# e.g. S1-T-05, ET3-C-10, EP6-T-15
+# [Index prefix][Scale]-[Method code]-[Threshold x 100, 3-digit]
+# e.g. S1-T-000, S1-T-025, ET3-C-050, EP6-T-100, S1-T-150
 config_table$config_id <- sprintf(
-  "%s-%s-%02d",
+  "%s-%s-%03d",
   # Index prefix
   dplyr::case_when(
     config_table$index == "spi1"     ~ "S1",
@@ -242,8 +244,9 @@ config_table$config_id <- sprintf(
   ),
   # Method code: T = threshold, C = cumulative
   ifelse(config_table$method == "threshold", "T", "C"),
-  # Threshold × 10 (absolute value)
-  abs(config_table$start_thr) * 10
+  # Threshold × 100 (absolute value), 3-digit zero-padded
+  # e.g. 0.0→000, -0.25→025, -0.5→050, -1.0→100, -1.5→150
+  round(abs(config_table$start_thr) * 100)
 )
 
 config_table <- config_table[order(config_table$index,
@@ -256,7 +259,7 @@ print(config_table[, c("config_id", "index", "method", "start_thr", "min_duratio
 
 
 # -- Step 3: Drought detection function ---------------------------------------
-# Analysis Plan §1.3 Step 3: scan each pixel's time series month by month.
+# Analysis Plan Section 1.3 Step 3: scan each pixel's time series month by month.
 #
 # Algorithm logic:
 #   - Scan forward through the time series.
@@ -272,7 +275,7 @@ print(config_table[, c("config_id", "index", "method", "start_thr", "min_duratio
 #     recovery month.
 #
 # Returns a data frame of events (one row per event) with characteristics
-# defined in analysis plan §1.3 Step 4.
+# defined in analysis plan Section 1.3 Step 4.
 detect_droughts <- function(index_vec, dates, method, start_thr, min_duration) {
 
   if (length(dates) != length(index_vec))
@@ -341,7 +344,7 @@ detect_droughts <- function(index_vec, dates, method, start_thr, min_duration) {
   if (drought_id == 0L) return(data.frame())
 
   # -- Step 4: Record event characteristics -----------------------------------
-  # Analysis Plan §1.3 Step 4: extract characteristics per event.
+  # Analysis Plan Section 1.3 Step 4: extract characteristics per event.
   monthly_tagged <- data.frame(
     event_date  = dates,
     index_val   = index_vec,
@@ -370,7 +373,7 @@ detect_droughts <- function(index_vec, dates, method, start_thr, min_duration) {
       }))
     })()
 
-  # Severity class based on peak index value (analysis plan §1.3 Step 4)
+  # Severity class based on peak index value (analysis plan Section 1.3 Step 4)
   events$severity_class <- dplyr::case_when(
     events$peak_index >= -1.0                              ~ "Mild",
     events$peak_index >= -1.5 & events$peak_index < -1.0 ~ "Moderate",
@@ -383,7 +386,7 @@ detect_droughts <- function(index_vec, dates, method, start_thr, min_duration) {
 
 
 # -- Step 3 (continued): Loop all configs × all pixels -----------------------
-# Analysis Plan §1.3 Step 3: process every pixel independently.
+# Analysis Plan Section 1.3 Step 3: process every pixel independently.
 # Each pixel uses its own SPI/SPEI time series (already standardised to its
 # own local historical distribution in Scripts 01/02a/02b).
 message("\n=== Step 3: Running detection — all configs × all pixels ===\n")
@@ -392,33 +395,39 @@ pixels <- unique(index_data[, c("x", "y")])
 pixels <- pixels[order(pixels$x, pixels$y), ]
 total_pixels <- nrow(pixels)
 
+# Pre-split index_data by pixel key once — avoids re-scanning full data frame
+# for every config × pixel combination (critical for performance).
+message("Pre-splitting index data by pixel...")
+index_data$pixel_key <- paste(index_data$x, index_data$y, sep = "_")
+pixel_list <- split(index_data, index_data$pixel_key)
+pixel_list <- lapply(pixel_list, function(d) d[order(d$date), ])
+message(sprintf("  %d unique pixels cached.\n", length(pixel_list)))
+
+n_cores <- max(1L, parallel::detectCores() - 1L)
+message(sprintf("Parallelising over %d cores (1 reserved for driver).\n", n_cores))
+
 overall_start <- Sys.time()
 
-all_drought_events <- purrr::map_dfr(seq_len(nrow(config_table)), function(cfg_i) {
+# Run configs in parallel across driver cores.
+# pixel_list and config_table must be available in each worker — mclapply
+# forks the process so they are automatically inherited (no extra export needed).
+config_results <- parallel::mclapply(seq_len(nrow(config_table)), function(cfg_i) {
 
   cfg <- config_table[cfg_i, ]
 
   message(sprintf(
-    "\n[%d/%d] Config: %s | index=%s | method=%s | thr=%.1f | min_dur=%d",
+    "\n[%d/%d] Config: %s | index=%s | method=%s | thr=%.2f | min_dur=%d",
     cfg_i, nrow(config_table),
     cfg$config_id, cfg$index, cfg$method, cfg$start_thr, cfg$min_duration
   ))
-
-  tick <- max(1L, floor(total_pixels / 10L))
 
   pixel_events <- purrr::map_dfr(seq_len(total_pixels), function(i) {
 
     px <- pixels$x[i]
     py <- pixels$y[i]
 
-    if (i %% tick == 0 || i == total_pixels) {
-      message(sprintf("  Pixel %d / %d  (%.0f%%)",
-                      i, total_pixels, 100 * i / total_pixels))
-    }
-
-    pixel_ts <- index_data[index_data$x == px & index_data$y == py, ]
-    pixel_ts <- pixel_ts[order(pixel_ts$date), ]
-
+    pixel_ts <- pixel_list[[paste(px, py, sep = "_")]]
+    if (is.null(pixel_ts)) return(data.frame())
     if (nrow(pixel_ts) < 12) return(data.frame())
 
     index_vec <- pixel_ts[[cfg$index]]
@@ -437,7 +446,6 @@ all_drought_events <- purrr::map_dfr(seq_len(nrow(config_table)), function(cfg_i
 
     if (nrow(events) == 0) return(data.frame())
 
-    # Tag each event with pixel coordinates and full config specs
     events$x            <- px
     events$y            <- py
     events$config_id    <- cfg$config_id
@@ -446,7 +454,6 @@ all_drought_events <- purrr::map_dfr(seq_len(nrow(config_table)), function(cfg_i
     events$start_thr    <- cfg$start_thr
     events$min_duration <- cfg$min_duration
 
-    # Carry country label if present
     if ("country" %in% names(pixel_ts)) {
       events$country <- pixel_ts$country[1]
     }
@@ -458,7 +465,9 @@ all_drought_events <- purrr::map_dfr(seq_len(nrow(config_table)), function(cfg_i
                   format(nrow(pixel_events), big.mark = ",")))
 
   return(pixel_events)
-})
+}, mc.cores = n_cores)
+
+all_drought_events <- dplyr::bind_rows(config_results)
 
 elapsed <- round(difftime(Sys.time(), overall_start, units = "mins"), 1)
 message(sprintf("\n=== Detection complete in %.1f minutes ===", as.numeric(elapsed)))
@@ -541,17 +550,17 @@ if ("country" %in% names(all_drought_events)) {
 # -- Save outputs -------------------------------------------------------------
 message("\n=== Saving outputs ===\n")
 
-saveRDS(all_drought_events, "./Data/all_drought_events.rds")
+saveRDS(all_drought_events, file.path(VOLUME_PATH, "all_drought_events.rds"))
 message("  all_drought_events.rds           — full event list, all configs")
 
 if (nrow(drought_summary_yearly) > 0) {
-  write.csv(drought_summary_yearly, "./Data/drought_summary_yearly.csv",
+  write.csv(drought_summary_yearly, file.path(VOLUME_PATH, "drought_summary_yearly.csv"),
             row.names = FALSE)
   message("  drought_summary_yearly.csv       — yearly summary per country per config")
 }
 
 if (nrow(drought_annual_summary) > 0) {
-  write.csv(drought_annual_summary, "./Data/drought_annual_summary.csv",
+  write.csv(drought_annual_summary, file.path(VOLUME_PATH, "drought_annual_summary.csv"),
             row.names = FALSE)
   message("  drought_annual_summary.csv       — one row per config per country")
 }

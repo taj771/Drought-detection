@@ -16,19 +16,12 @@
 
 
 # -- Libraries ----------------------------------------------------------------
-library(here)
 library(sparklyr)
 library(dplyr)
 library(dbplyr)
-library(ggplot2)
-library(colorspace)
-library(tidyterra)
-library(terra)
-library(ggpubr)
 library(tidyr)
 library(stringr)
 library(lubridate)
-library(modelsummary)
 library(SPEI)
 
 
@@ -42,9 +35,9 @@ sc <- spark_connect(
 
 
 # -- Data source --------------------------------------------------------------
-# Analysis Plan §1.1 Step 1: ERA5 daily data table on Databricks.
+# Analysis Plan Section 1.1 Step 1: ERA5 daily data table on Databricks.
 # Table contains: x, y (pixel coords), time, year, month, precip, mean_temp.
-# Data range: 1973–2023. Reference period for fitting: 1970–2000 (set in Step 4).
+# Data range: 1973–2023. Reference period for fitting: 1970–1999 (set in Step 4).
 project_folder <- "xx_drought_index"
 
 era5_normals <- tbl(sc, in_catalog("projects", project_folder, "drought_index_dailysummary"))
@@ -68,7 +61,7 @@ era5_normals %>%
 
 
 # -- Step 3: Daily → monthly aggregation (runs in Spark) ----------------------
-# Analysis Plan §1.1 Step 3: Sum daily precipitation within each month per pixel.
+# Analysis Plan Section 1.1 Step 3: Sum daily precipitation within each month per pixel.
 # All computation stays in Spark — avoids pulling raw daily data into R memory.
 # Months with 5+ missing days excluded as a data quality guard.
 monthly_spark <- era5_normals %>%
@@ -99,7 +92,7 @@ monthly_r <- monthly_spark %>% collect()
 
 
 # -- Step 4–6: SPI calculator for a single pixel ------------------------------
-# Analysis Plan §1.1 Steps 4–6:
+# Analysis Plan Section 1.1 Steps 4–6:
 #   Step 4: Fit Gamma distribution to historical aggregated precipitation
 #   Step 5: Calculate cumulative probability from the fitted Gamma
 #   Step 6: Transform cumulative probability to standard normal z-score (SPI)
@@ -124,7 +117,7 @@ safe_spi <- function(precip_vec, scale = 3) {
 
 
 # -- Step 2 + 4–6: Apply SPI at all four accumulation periods -----------------
-# Analysis Plan §1.1 Step 2: four accumulation periods (1, 3, 6, 12 months).
+# Analysis Plan Section 1.1 Step 2: four accumulation periods (1, 3, 6, 12 months).
 #
 # SPI-1  → single-month anomaly; captures rapid onset drought
 # SPI-3  → 3-month rolling sum; seasonal/short-term drought
@@ -151,4 +144,5 @@ head(spi_results)
 # -- Save output --------------------------------------------------------------
 # spi_results.rds is the input to Script 03 (drought detection).
 # One row per pixel per month; columns: x, y, year, month, spi1, spi3, spi6, spi12.
-saveRDS(spi_results, "./Data/spi_results.rds")
+VOLUME_PATH <- "/Volumes/projects/gwsc_drought/drought_outputs"
+saveRDS(spi_results, file.path(VOLUME_PATH, "spi_results.rds"))

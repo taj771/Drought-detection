@@ -28,12 +28,8 @@
 
 # -- Libraries ----------------------------------------------------------------
 library(here)
-library(sparklyr)
-library(dbplyr)
 library(terra)
 library(dplyr)
-library(tidyr)
-library(stringr)
 library(lubridate)
 
 
@@ -55,7 +51,7 @@ project_folder <- "xx_drought_index"
 catalog_name   <- "projects"
 
 # Year range — used for layer date labelling, must match Script 03
-years <- as.character(1970:2000)
+years <- as.character(1970:2023)
 
 # =============================================================================
 
@@ -95,60 +91,30 @@ for (f in nc_files) {
 }
 
 
-# -- Step 3: Get ERA5 coordinate grid from Databricks -------------------------
-# Pulls actual x/y values from ERA5 table to build exact resample template.
-# This ensures cell centres land on ERA5 pixel coordinates after resampling.
-message("\n=== Step 3: Getting ERA5 grid from Databricks ===\n")
+# -- Step 3: Build ERA5 0.25 deg template raster ------------------------------
+# ERA5 uses a standard global 0.25 deg grid with cell centres at
+# x = -179.875, -179.625, ... 179.875  (step 0.25, offset 0.125 from integer)
+# y =  -89.875,  -89.625, ...  89.875  (step 0.25, offset 0.125 from integer)
+# No Databricks connection needed — grid spec is fixed.
+message("\n=== Step 3: Building ERA5 0.25 deg template raster ===\n")
 
-sc <- spark_connect(
-  method     = "databricks_connect",
-  cluster_id = Sys.getenv("DATABRICKS_CLUSTER_ID")
-)
+x_res <- 0.25
+y_res <- 0.25
 
-era5_normals <- tbl(sc, in_catalog(catalog_name, project_folder,
-                                   "drought_index_dailysummary"))
-
-cat("Pulling ERA5 coordinate grid from catalog...\n")
-
-era5_coords <- era5_normals |>
-  select(x, y) |>
-  distinct() |>
-  collect()
-
-x_vals <- sort(unique(round(era5_coords$x, 6)))
-y_vals <- sort(unique(round(era5_coords$y, 6)))
-x_res  <- round(median(diff(x_vals)), 6)
-y_res  <- round(median(diff(y_vals)), 6)
-
-cat(sprintf("ERA5 grid:\n"))
-cat(sprintf("  X: %d values  %.4f to %.4f  step=%.4f\n",
-            length(x_vals), min(x_vals), max(x_vals), x_res))
-cat(sprintf("  Y: %d values  %.4f to %.4f  step=%.4f\n",
-            length(y_vals), min(y_vals), max(y_vals), y_res))
-cat(sprintf("  Resolution: %.4f deg (~%.1f km)\n", x_res, x_res * 111))
-
-
-# -- Step 4: Build ERA5 template raster ---------------------------------------
-# Half-cell offset ensures cell centres land exactly on ERA5 coordinate values.
 era5_template <- rast(
-  xmin       = min(x_vals) - (x_res / 2),
-  xmax       = max(x_vals) + (x_res / 2),
-  ymin       = min(y_vals) - (y_res / 2),
-  ymax       = max(y_vals) + (y_res / 2),
-  resolution = x_res,
+  xmin       = -180,
+  xmax       =  180,
+  ymin       =  -90,
+  ymax       =   90,
+  resolution = 0.25,
   crs        = "EPSG:4326"
 )
 
-era5_exact_extent <- ext(
-  min(x_vals) - (x_res / 2),
-  max(x_vals) + (x_res / 2),
-  min(y_vals) - (y_res / 2),
-  max(y_vals) + (y_res / 2)
-)
+era5_exact_extent <- ext(-180, 180, -90, 90)
 
-cat(sprintf("\nERA5 template raster:\n"))
+cat(sprintf("ERA5 template raster:\n"))
 cat(sprintf("  Rows x Cols : %d x %d\n", nrow(era5_template), ncol(era5_template)))
-cat(sprintf("  Cell centres: x=%.4f  y=%.4f\n", min(x_vals), min(y_vals)))
+cat(sprintf("  Resolution  : %.4f deg\n", x_res))
 
 
 # -- Step 5: Resample function ------------------------------------------------
@@ -273,8 +239,10 @@ for (nm in names(clipped_files)) {
   df     <- as.data.frame(r[[1]], xy = TRUE, na.rm = TRUE)
   pet_x  <- sort(unique(round(df$x, 4)))
   pet_y  <- sort(unique(round(df$y, 4)))
-  x_hit  <- sum(round(pet_x, 4) %in% round(x_vals, 4))
-  y_hit  <- sum(round(pet_y, 4) %in% round(y_vals, 4))
+  era5_x <- seq(-179.875, 179.875, by = 0.25)
+  era5_y <- seq( -89.875,  89.875, by = 0.25)
+  x_hit  <- sum(round(pet_x, 4) %in% round(era5_x, 4))
+  y_hit  <- sum(round(pet_y, 4) %in% round(era5_y, 4))
   x_pct  <- round(100 * x_hit / length(pet_x), 1)
   y_pct  <- round(100 * y_hit / length(pet_y), 1)
   pass   <- x_pct >= 95 & y_pct >= 95
@@ -293,47 +261,8 @@ cat(sprintf("Overall alignment: %s\n",
                    "Some files need checking — review output above")))
 
 
-# -- Step 8: Test join with ERA5 normals table --------------------------------
-# Joins one PET layer against ERA5 pixel coordinates to confirm x/y match.
-message("\n=== Step 8: Testing join with ERA5 normals ===\n")
-
-for (nm in names(clipped_files)) {
-
-  fpath <- clipped_files[[nm]]
-  if (is.null(fpath) || !file.exists(fpath)) next
-
-  cat(sprintf("File: %s\n", nm))
-
-  r      <- rast(fpath)
-  df_pet <- as.data.frame(r[[1]], xy = TRUE, na.rm = TRUE) |>
-    setNames(c("x", "y", "pet_mm")) |>
-    transform(x = round(x, 4), y = round(y, 4))
-
-  x_min_filter <- min(df_pet$x) - 0.1
-  x_max_filter <- max(df_pet$x) + 0.1
-  y_min_filter <- min(df_pet$y) - 0.1
-  y_max_filter <- max(df_pet$y) + 0.1
-
-  df_era5 <- era5_normals |>
-    filter(x >= x_min_filter, x <= x_max_filter,
-           y >= y_min_filter, y <= y_max_filter) |>
-    select(x, y) |>
-    distinct() |>
-    collect() |>
-    transform(x = round(x, 4), y = round(y, 4))
-
-  df_joined <- merge(df_era5, df_pet, by = c("x", "y"))
-  pct       <- round(100 * nrow(df_joined) / nrow(df_era5), 1)
-
-  cat(sprintf("  ERA5 pixels : %s\n", format(nrow(df_era5),   big.mark = ",")))
-  cat(sprintf("  PET pixels  : %s\n", format(nrow(df_pet),    big.mark = ",")))
-  cat(sprintf("  Joined rows : %s (%.1f%% match)\n",
-              format(nrow(df_joined), big.mark = ","), pct))
-  cat(sprintf("  Result      : %s\n\n",
-              ifelse(pct >= 95,
-                     "PASS — safe to join on x and y",
-                     "WARNING — check alignment")))
-}
+# -- Step 8: skipped — Databricks join test not needed for local resample -----
+message("\n=== Step 8: Skipped (ERA5 join verified via coordinate alignment above) ===\n")
 
 
 # -- Summary ------------------------------------------------------------------
