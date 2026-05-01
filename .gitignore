@@ -7,6 +7,12 @@ Figures/
 
 Data/
 *.rds
+*.csv
+*.nc
+*.jpg
+*.jpeg
+*.png
+*.pdf
 
 
 
