@@ -63,9 +63,21 @@ if (RUN_SPEI_P) {
 ```{r step3-detection}
 if (RUN_DETECTION) {
   message("================================================================")
-  message("STEP 3: Drought Detection — All 45 Configurations")
+  message("STEP 3: Drought Detection — All 75 Configurations")
   message("================================================================")
-  source(file.path(CODES_PATH, "03. Drought_Detection.R"))
+  tryCatch(
+    source(file.path(CODES_PATH, "03. Drought_Detection.R")),
+    error = function(e) {
+      err_msg <- paste0(
+        "SCRIPT 03 ERROR at ", Sys.time(), "\n",
+        conditionMessage(e), "\n",
+        paste(capture.output(traceback()), collapse = "\n")
+      )
+      writeLines(err_msg, "/Volumes/projects/gwsc_drought/drought_outputs/script03_error.txt")
+      message("ERROR WRITTEN TO VOLUME: script03_error.txt")
+      stop(e)
+    }
+  )
 }
 ```
 
