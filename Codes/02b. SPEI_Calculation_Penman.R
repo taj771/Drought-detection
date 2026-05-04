@@ -127,7 +127,10 @@ pet_pixels_sdf <- copy_to(
 era5_normals <- tbl(sc, in_catalog(catalog_name, project_folder,
                                    "drought_index_dailysummary"))
 
+COUNTRY_FILTER <- c("Argentina", "Benin", "Thailand", "Greece", "Mexico", "South Africa")
+
 monthly_spark <- era5_normals |>
+  filter(country %in% COUNTRY_FILTER) |>
   group_by(x, y, country, year, month) |>
   summarise(
     monthly_precip = sum(precip, na.rm = TRUE),

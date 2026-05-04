@@ -64,7 +64,10 @@ era5_normals %>%
 # NOTE: Verify ERA5 mean_temp units. ERA5 raw = Kelvin; convert to °C if needed
 #       (thornthwaite() requires °C). Check with: range(monthly_r$mean_temp_monthly)
 #       If values ~273–310, subtract 273.15 in the safe_spei() function below.
+COUNTRY_FILTER <- c("Argentina", "Benin", "Thailand", "Greece", "Mexico", "South Africa")
+
 monthly_spark <- era5_normals %>%
+  filter(country %in% COUNTRY_FILTER) %>%
   group_by(x, y, country, year, month) %>%
   summarise(
     monthly_precip    = sum(precip, na.rm = TRUE),

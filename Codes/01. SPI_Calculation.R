@@ -62,7 +62,10 @@ era5_normals %>%
 # Analysis Plan Section 1.1 Step 3: Sum daily precipitation within each month per pixel.
 # All computation stays in Spark — avoids pulling raw daily data into R memory.
 # Months with 5+ missing days excluded as a data quality guard.
+COUNTRY_FILTER <- c("Argentina", "Benin", "Thailand", "Greece", "Mexico", "South Africa")
+
 monthly_spark <- era5_normals %>%
+  filter(country %in% COUNTRY_FILTER) %>%
   group_by(x, y, country, year, month) %>%
   summarise(
     monthly_precip    = sum(precip, na.rm = TRUE),
