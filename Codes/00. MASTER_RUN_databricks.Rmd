@@ -21,9 +21,9 @@ message("SPEI available on cluster.")
 ```
 
 ```{r run-flags}
-RUN_SPI        <- TRUE   # Script 01: SPI calculation — rerun with country column fix
-RUN_SPEI_T     <- TRUE   # Script 02a: SPEI Thornthwaite — rerun with country column fix
-RUN_SPEI_P     <- TRUE   # Script 02b: SPEI Penman-Monteith — rerun with country column fix
+RUN_SPI        <- FALSE  # Script 01: SPI calculation — DONE with country fix 2026-05-04
+RUN_SPEI_T     <- FALSE  # Script 02a: SPEI Thornthwaite — DONE with country fix 2026-05-04
+RUN_SPEI_P     <- FALSE  # Script 02b: SPEI Penman-Monteith — DONE with country fix 2026-05-04
 RUN_DETECTION  <- TRUE   # Script 03: Drought detection
 RUN_SANITY     <- FALSE  # Script 04: Sanity checks
 RUN_REF_PARAMS <- FALSE  # Script 05: Freeze reference period params
