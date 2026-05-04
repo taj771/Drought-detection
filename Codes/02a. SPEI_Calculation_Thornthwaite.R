@@ -65,7 +65,7 @@ era5_normals %>%
 #       (thornthwaite() requires °C). Check with: range(monthly_r$mean_temp_monthly)
 #       If values ~273–310, subtract 273.15 in the safe_spei() function below.
 monthly_spark <- era5_normals %>%
-  group_by(x, y, year, month) %>%
+  group_by(x, y, country, year, month) %>%
   summarise(
     monthly_precip    = sum(precip, na.rm = TRUE),
     mean_temp_monthly = mean(mean_temp, na.rm = TRUE),

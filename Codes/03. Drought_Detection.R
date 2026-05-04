@@ -65,8 +65,8 @@
 
 # -- Libraries ----------------------------------------------------------------
 library(dplyr)
-library(purrr)
 library(lubridate)
+library(parallel)
 
 
 # =============================================================================
@@ -121,6 +121,13 @@ INDICES          <- c("spi1", "spi3", "spi6", "spi12",
 METHODS          <- c("threshold", "cumulative")
 START_THRESHOLDS <- c(0.0, -0.25, -0.5, -1.0, -1.5)
 MIN_DURATION     <- 1   # fixed at 1 per analysis plan (Appendix A1)
+
+# -- Parallelism ---------------------------------------------------------------
+# Configs processed simultaneously. Each worker inherits pixel_list via fork
+# (copy-on-write). N_CORES=1 = sequential (safe); N_CORES=2 = 2x faster but
+# risks OOM if pixel_list is large (previous runs OOMed with pixel-level
+# mclapply — config-level is safer but test with 1 first).
+N_CORES <- 1L
 
 # =============================================================================
 
@@ -281,97 +288,100 @@ detect_droughts <- function(index_vec, dates, method, start_thr, min_duration) {
   if (length(dates) != length(index_vec))
     stop("'dates' and 'index_vec' must be same length")
 
-  dates  <- as.Date(dates)
-  n      <- length(index_vec)
+  dates <- as.Date(dates)
 
-  event_id   <- rep(NA_integer_, n)
-  cum_track  <- rep(NA_real_,    n)
-  drought_id <- 0L
-  i          <- 1L
+  # Strip NAs once upfront — avoids per-iteration is.na checks in the loop.
+  valid_idx <- which(!is.na(index_vec) & !is.nan(index_vec))
+  if (length(valid_idx) < min_duration) return(data.frame())
+  iv <- index_vec[valid_idx]
+  dt <- dates[valid_idx]
+  n  <- length(iv)
 
-  while (i <= n) {
+  if (method == "threshold") {
 
-    val <- index_vec[i]
-    if (is.na(val) || is.nan(val)) { i <- i + 1L; next }
+    # -- Fully vectorised threshold method using run-length encoding -----------
+    # Each contiguous run of months all below start_thr (length >= min_duration)
+    # is one drought event.  rle() replaces the month-by-month while/for scan.
+    below <- iv < start_thr
+    if (!any(below)) return(data.frame())
 
-    # -- Check min_duration consecutive months all below start_thr ------------
-    window       <- index_vec[i:min(i + min_duration - 1L, n)]
-    window       <- window[!is.na(window) & !is.nan(window)]
-    onset_confirmed <- (length(window) == min_duration) &&
-                       all(window < start_thr)
+    rl         <- rle(below)
+    run_ends   <- cumsum(rl$lengths)
+    run_starts <- c(1L, run_ends[-length(run_ends)] + 1L)
+    event_runs <- which(rl$values & rl$lengths >= min_duration)
+    if (length(event_runs) == 0L) return(data.frame())
 
-    if (!onset_confirmed) { i <- i + 1L; next }
+    events_list <- lapply(seq_along(event_runs), function(e_i) {
+      r    <- event_runs[e_i]
+      si   <- run_starts[r]
+      ei   <- run_ends[r]
+      ev_v <- iv[si:ei]
+      ev_d <- dt[si:ei]
+      cs   <- cumsum(ev_v)
+      data.frame(
+        drought_id      = e_i,
+        start_date      = ev_d[1L],
+        end_date        = ev_d[length(ev_d)],
+        duration_months = length(ev_d),
+        entry_index     = ev_v[1L],
+        peak_index      = min(ev_v),
+        peak_date       = ev_d[which.min(ev_v)],
+        cum_deficit_neg = sum(ev_v[ev_v < 0]),
+        total_severity  = sum(ev_v),
+        min_cum_deficit = min(cs),
+        stringsAsFactors = FALSE
+      )
+    })
+    events <- do.call(rbind, events_list)
 
-    # -- Drought onset confirmed ----------------------------------------------
-    drought_id  <- drought_id + 1L
-    cum_deficit <- 0
-    months_in_event <- 0L
+  } else {
 
-    for (k in i:n) {
+    # -- Semi-vectorised cumulative method ------------------------------------
+    # Outer while advances to each onset; inner recovery uses cumsum() instead
+    # of a per-month for loop — avoids O(n^2) iteration for long events.
+    events_list <- list()
+    drought_id  <- 0L
+    i           <- 1L
 
-      val_k <- index_vec[k]
-      if (is.na(val_k) || is.nan(val_k)) next
+    while (i <= n) {
+      if (iv[i] >= start_thr) { i <- i + 1L; next }
 
-      months_in_event <- months_in_event + 1L
+      # cumsum from onset: first position where cs >= 0 is the recovery month.
+      cs <- cumsum(iv[i:n])
+      r  <- which(cs >= 0L)[1L]
 
-      if (method == "threshold") {
-        # Recovery: first month index >= start_thr (after at least 1 month in event)
-        if (months_in_event > 1L && val_k >= start_thr) {
-          i <- k + 1L
-          break
-        }
-        event_id[k]  <- drought_id
-        cum_deficit  <- cum_deficit + val_k
-        cum_track[k] <- cum_deficit
-
-      } else if (method == "cumulative") {
-        # Accumulate before checking recovery
-        cum_deficit <- cum_deficit + val_k
-        # Recovery: cumulative sum returns to >= 0 (wet month repaid deficit)
-        # Recovery month not tagged — it is a positive contribution, not drought
-        if (cum_deficit >= 0) {
-          i <- k + 1L
-          break
-        }
-        event_id[k]  <- drought_id
-        cum_track[k] <- cum_deficit
+      if (is.na(r)) {
+        ev_v  <- iv[i:n];     ev_d  <- dt[i:n]
+        i     <- n + 1L
+      } else {
+        ev_end <- i + r - 2L   # last month IN the event (recovery month excluded)
+        if (ev_end < i) { i <- i + r; next }
+        ev_v  <- iv[i:ev_end]; ev_d  <- dt[i:ev_end]
+        i     <- i + r
       }
 
-      if (k == n) { i <- n + 1L }
+      if (length(ev_v) == 0L) next
+
+      drought_id <- drought_id + 1L
+      cs_ev <- cumsum(ev_v)
+      events_list[[drought_id]] <- data.frame(
+        drought_id      = drought_id,
+        start_date      = ev_d[1L],
+        end_date        = ev_d[length(ev_d)],
+        duration_months = length(ev_d),
+        entry_index     = ev_v[1L],
+        peak_index      = min(ev_v),
+        peak_date       = ev_d[which.min(ev_v)],
+        cum_deficit_neg = sum(ev_v[ev_v < 0]),
+        total_severity  = sum(ev_v),
+        min_cum_deficit = min(cs_ev),
+        stringsAsFactors = FALSE
+      )
     }
+
+    if (drought_id == 0L) return(data.frame())
+    events <- do.call(rbind, events_list)
   }
-
-  if (drought_id == 0L) return(data.frame())
-
-  # -- Step 4: Record event characteristics -----------------------------------
-  # Analysis Plan Section 1.3 Step 4: extract characteristics per event.
-  monthly_tagged <- data.frame(
-    event_date  = dates,
-    index_val   = index_vec,
-    event_id    = event_id,
-    cum_deficit = cum_track,
-    stringsAsFactors = FALSE
-  )
-  monthly_tagged <- monthly_tagged[!is.na(monthly_tagged$event_id), ]
-
-  events <- monthly_tagged |>
-    (\(d) {
-      do.call(rbind, lapply(split(d, d$event_id), function(ev) {
-        data.frame(
-          drought_id      = ev$event_id[1],
-          start_date      = min(ev$event_date),
-          end_date        = max(ev$event_date),
-          duration_months = nrow(ev),
-          entry_index     = ev$index_val[which.min(ev$event_date)],
-          peak_index      = min(ev$index_val,          na.rm = TRUE),
-          peak_date       = ev$event_date[which.min(ev$index_val)],
-          cum_deficit_neg = sum(ev$index_val[ev$index_val < 0], na.rm = TRUE),
-          total_severity  = sum(ev$index_val,           na.rm = TRUE),
-          min_cum_deficit = min(ev$cum_deficit,         na.rm = TRUE),
-          stringsAsFactors = FALSE
-        )
-      }))
-    })()
 
   # Severity class based on peak index value (analysis plan Section 1.3 Step 4)
   events$severity_class <- dplyr::case_when(
@@ -403,6 +413,15 @@ pixel_list <- split(index_data, index_data$pixel_key)
 pixel_list <- lapply(pixel_list, function(d) d[order(d$date), ])
 message(sprintf("  %d unique pixels cached.\n", length(pixel_list)))
 
+# Preserve pixels_per_country lookup before releasing index_data.
+# index_data and pixel_list hold identical rows — keeping both doubles RAM.
+if ("country" %in% names(index_data)) {
+  pixels_per_country_pre <- unique(index_data[!is.na(index_data$country),
+                                               c("x", "y", "country")])
+}
+rm(index_data)
+gc()
+
 overall_start <- Sys.time()
 
 # Write each config result to disk immediately to avoid accumulating all 75
@@ -411,27 +430,34 @@ tmp_dir <- file.path(VOLUME_PATH, "detection_tmp")
 dir.create(tmp_dir, showWarnings = FALSE, recursive = TRUE)
 message(sprintf("Temp dir for config chunks: %s\n", tmp_dir))
 
-for (cfg_i in seq_len(nrow(config_table))) {
+parallel::mclapply(seq_len(nrow(config_table)), function(cfg_i) {
 
   cfg <- config_table[cfg_i, ]
 
-  message(sprintf(
-    "\n[%d/%d] Config: %s | index=%s | method=%s | thr=%.2f | min_dur=%d",
+  chunk_file <- file.path(tmp_dir, paste0("cfg_", cfg$config_id, ".rds"))
+  if (file.exists(chunk_file)) {
+    cat(sprintf("\n[%d/%d] SKIP (exists): %s\n", cfg_i, nrow(config_table), cfg$config_id))
+    return(invisible(NULL))
+  }
+
+  cat(sprintf(
+    "\n[%d/%d] Config: %s | index=%s | method=%s | thr=%.2f\n",
     cfg_i, nrow(config_table),
-    cfg$config_id, cfg$index, cfg$method, cfg$start_thr, cfg$min_duration
+    cfg$config_id, cfg$index, cfg$method, cfg$start_thr
   ))
 
-  pixel_events <- purrr::map_dfr(seq_len(total_pixels), function(i) {
+  # lapply + Filter + do.call(rbind) — faster than purrr::map_dfr for large
+  # pixel lists (no per-row overhead, direct list pre-allocation).
+  pixel_events_list <- lapply(seq_len(total_pixels), function(i) {
 
     px <- pixels$x[i]
     py <- pixels$y[i]
 
     pixel_ts <- pixel_list[[paste(px, py, sep = "_")]]
-    if (is.null(pixel_ts)) return(data.frame())
-    if (nrow(pixel_ts) < 12) return(data.frame())
+    if (is.null(pixel_ts) || nrow(pixel_ts) < 12) return(NULL)
 
     index_vec <- pixel_ts[[cfg$index]]
-    if (all(is.na(index_vec))) return(data.frame())
+    if (is.null(index_vec) || all(is.na(index_vec))) return(NULL)
 
     events <- tryCatch(
       detect_droughts(
@@ -441,10 +467,10 @@ for (cfg_i in seq_len(nrow(config_table))) {
         start_thr    = cfg$start_thr,
         min_duration = cfg$min_duration
       ),
-      error = function(e) data.frame()
+      error = function(e) NULL
     )
 
-    if (nrow(events) == 0) return(data.frame())
+    if (is.null(events) || nrow(events) == 0) return(NULL)
 
     events$x            <- px
     events$y            <- py
@@ -458,120 +484,173 @@ for (cfg_i in seq_len(nrow(config_table))) {
       events$country <- pixel_ts$country[1]
     }
 
-    return(events)
+    events
   })
 
-  message(sprintf("  -> %s events detected",
-                  format(nrow(pixel_events), big.mark = ",")))
+  nonempty <- Filter(Negate(is.null), pixel_events_list)
+  pixel_events <- if (length(nonempty) > 0) do.call(rbind, nonempty) else data.frame()
+  rm(pixel_events_list, nonempty)
 
-  # Write to disk immediately — don't hold all configs in RAM
-  chunk_file <- file.path(tmp_dir, paste0("cfg_", cfg$config_id, ".rds"))
+  cat(sprintf("  -> %s events detected\n",
+              format(nrow(pixel_events), big.mark = ",")))
+
   saveRDS(pixel_events, chunk_file)
-  rm(pixel_events)
-  gc()
+  invisible(NULL)
+
+}, mc.cores = N_CORES)
+
+# -- Assemble chunks + compute summaries one config at a time -----------------
+# Unity Catalog Volumes do NOT support append writes — fwrite(append=TRUE) removed.
+# Summaries computed per-config inside loop (small RAM).
+# After loop: single rbindlist pass for all_drought_events (summaries already freed).
+if (!requireNamespace("data.table", quietly = TRUE)) install.packages("data.table")
+library(data.table)
+
+message("\nCombining config chunks and computing summaries (one config at a time)...")
+chunk_files <- list.files(tmp_dir, pattern = "^cfg_.*\\.rds$", full.names = TRUE)
+
+if (exists("pixels_per_country_pre")) {
+  ppc <- as.data.table(pixels_per_country_pre)
+} else {
+  ppc <- NULL
 }
 
-# Read and combine all config chunks
-message("\nCombining config chunks from disk...")
-chunk_files <- list.files(tmp_dir, pattern = "^cfg_.*\\.rds$", full.names = TRUE)
-all_drought_events <- dplyr::bind_rows(lapply(chunk_files, readRDS))
-message(sprintf("Combined %d chunk files.", length(chunk_files)))
+yearly_list    <- vector("list", length(chunk_files))
+n_total_events <- 0L
 
-elapsed <- round(difftime(Sys.time(), overall_start, units = "mins"), 1)
-message(sprintf("\n=== Detection complete in %.1f minutes ===", as.numeric(elapsed)))
-message(sprintf("Total events across all configs: %s\n",
-                format(nrow(all_drought_events), big.mark = ",")))
+for (i in seq_along(chunk_files)) {
+  chunk <- readRDS(chunk_files[[i]])
 
+  if (is.null(chunk) || nrow(chunk) == 0L) {
+    yearly_list[[i]] <- NULL
+    next
+  }
 
-# -- Summaries ----------------------------------------------------------------
-# Yearly summary: mean characteristics per country per config per year.
-# Annual summary: collapse yearly → one row per country per config.
-# Config comparison: one row per config per country for comparing configurations.
+  setDT(chunk)
 
-if ("country" %in% names(all_drought_events)) {
+  if (is.null(ppc) && "country" %in% names(chunk)) {
+    ppc <- unique(chunk[!is.na(country), .(x, y, country)])
+  }
 
-  pixels_per_country <- unique(index_data[!is.na(index_data$country),
-                                          c("x", "y", "country")]) |>
-    (\(d) aggregate(x ~ country, data = d, FUN = length))() |>
-    setNames(c("country", "total_pixels_country"))
+  n_total_events <- n_total_events + nrow(chunk)
 
-  all_drought_events <- all_drought_events[
-    !is.infinite(all_drought_events$peak_index) &
-      !is.na(all_drought_events$country), ]
+  # Fallback: join country from ppc if chunk lacks column (handles stale cfg_ files).
+  if (!"country" %in% names(chunk) && !is.null(ppc)) {
+    chunk <- merge(chunk, ppc, by = c("x", "y"), all.x = TRUE)
+  }
 
-  all_drought_events$event_year <- as.integer(format(
-    as.Date(all_drought_events$start_date), "%Y"))
+  if ("country" %in% names(chunk) && any(!is.na(chunk$country))) {
+    chunk <- chunk[!is.infinite(peak_index) & !is.na(country)]
+    chunk[, event_year := as.integer(format(as.Date(start_date), "%Y"))]
 
-  # -- Yearly summary ---------------------------------------------------------
-  drought_summary_yearly <- all_drought_events |>
-    group_by(config_id, index, method, start_thr, min_duration,
-             country, event_year, x, y) |>
-    summarise(
-      pixel_n_events      = n(),
+    px_yr <- chunk[, .(
+      pixel_n_events      = .N,
       pixel_mean_duration = mean(duration_months, na.rm = TRUE),
       pixel_mean_peak     = mean(peak_index,      na.rm = TRUE),
       pixel_mean_severity = mean(total_severity,  na.rm = TRUE),
       pixel_n_mild        = sum(severity_class == "Mild",     na.rm = TRUE),
       pixel_n_moderate    = sum(severity_class == "Moderate", na.rm = TRUE),
       pixel_n_severe      = sum(severity_class == "Severe",   na.rm = TRUE),
-      pixel_n_extreme     = sum(severity_class == "Extreme",  na.rm = TRUE),
-      .groups = "drop"
-    ) |>
-    group_by(config_id, index, method, start_thr, min_duration,
-             country, event_year) |>
-    summarise(
-      pixels_with_drought   = n(),
+      pixel_n_extreme     = sum(severity_class == "Extreme",  na.rm = TRUE)
+    ), keyby = .(config_id, index, method, start_thr, min_duration,
+                 country, event_year, x, y)]
+
+    cy <- px_yr[, .(
+      pixels_with_drought   = .N,
       mean_events_per_pixel = round(mean(pixel_n_events,      na.rm = TRUE), 1),
       mean_duration_months  = round(mean(pixel_mean_duration, na.rm = TRUE), 1),
       mean_peak_index       = round(mean(pixel_mean_peak,     na.rm = TRUE), 2),
-      mean_total_severity   = round(mean(pixel_mean_severity, na.rm = TRUE), 2),
-      .groups = "drop"
-    ) |>
-    merge(pixels_per_country, by = "country") |>
-    transform(pct_pixels_affected = round(
-      100 * pixels_with_drought / total_pixels_country, 1)) |>
-    (\(d) d[, !names(d) %in% "total_pixels_country"])()|>
-    (\(d) d[order(d$config_id, d$country, d$event_year), ])()
+      mean_total_severity   = round(mean(pixel_mean_severity, na.rm = TRUE), 2)
+    ), keyby = .(config_id, index, method, start_thr, min_duration,
+                 country, event_year)]
 
-  # -- Annual summary ---------------------------------------------------------
-  n_years <- length(unique(all_drought_events$event_year))
+    yearly_list[[i]] <- cy
+  } else {
+    yearly_list[[i]] <- NULL
+  }
 
-  drought_annual_summary <- drought_summary_yearly |>
-    group_by(config_id, index, method, start_thr, min_duration, country) |>
-    summarise(
-      annual_freq_events   = round(sum(mean_events_per_pixel, na.rm = TRUE) / n_years, 2),
-      annual_pct_pixels    = round(sum(pct_pixels_affected,   na.rm = TRUE) / n_years, 1),
-      annual_mean_duration = round(mean(mean_duration_months, na.rm = TRUE), 1),
-      annual_mean_peak     = round(mean(mean_peak_index,      na.rm = TRUE), 2),
-      annual_mean_severity = round(mean(mean_total_severity,  na.rm = TRUE), 2),
-      .groups = "drop"
-    ) |>
-    (\(d) d[order(d$country, d$index, d$method, d$start_thr), ])()
-
-} else {
-  message("No 'country' column — skipping country-level summaries.")
-  drought_summary_yearly <- data.frame()
-  drought_annual_summary <- data.frame()
+  rm(chunk, px_yr)
+  if (i %% 10L == 0L) gc()
 }
 
+elapsed <- round(difftime(Sys.time(), overall_start, units = "mins"), 1)
+message(sprintf("\n=== Summary pass complete in %.1f minutes ===", as.numeric(elapsed)))
+message(sprintf("Total events across all configs: %s\n", format(n_total_events, big.mark = ",")))
+
+# -- Build summaries from small per-config slabs ------------------------------
+non_null_yearly <- Filter(Negate(is.null), yearly_list)
+rm(yearly_list); gc()
+
+if (length(non_null_yearly) > 0 && !is.null(ppc)) {
+
+  drought_summary_yearly <- rbindlist(non_null_yearly, use.names = TRUE, fill = TRUE)
+  rm(non_null_yearly); gc()
+
+  ppc_count <- if (is.data.table(ppc)) {
+    ppc[, .(total_pixels_country = .N), by = country]
+  } else {
+    dt <- as.data.table(aggregate(x ~ country, data = as.data.frame(ppc), FUN = length))
+    setnames(dt, c("country", "total_pixels_country"))
+    dt
+  }
+
+  drought_summary_yearly <- merge(drought_summary_yearly, ppc_count,
+                                  by = "country", all.x = TRUE)
+  drought_summary_yearly[, pct_pixels_affected := round(
+    100 * pixels_with_drought / total_pixels_country, 1)]
+  drought_summary_yearly[, total_pixels_country := NULL]
+  setorder(drought_summary_yearly, config_id, country, event_year)
+
+  n_years <- drought_summary_yearly[, uniqueN(event_year)]
+
+  drought_annual_summary <- drought_summary_yearly[, .(
+    annual_freq_events   = round(sum(mean_events_per_pixel, na.rm = TRUE) / n_years, 2),
+    annual_pct_pixels    = round(sum(pct_pixels_affected,   na.rm = TRUE) / n_years, 1),
+    annual_mean_duration = round(mean(mean_duration_months, na.rm = TRUE), 1),
+    annual_mean_peak     = round(mean(mean_peak_index,      na.rm = TRUE), 2),
+    annual_mean_severity = round(mean(mean_total_severity,  na.rm = TRUE), 2)
+  ), keyby = .(config_id, index, method, start_thr, min_duration, country)]
+  setorder(drought_annual_summary, country, index, method, start_thr)
+
+} else {
+  message("No 'country' column in any chunk — skipping country-level summaries.")
+  drought_summary_yearly <- data.table()
+  drought_annual_summary <- data.table()
+  rm(non_null_yearly); gc()
+}
+
+# -- Assemble all_drought_events (single rbindlist after summaries freed) -----
+# Summaries done and yearly_list freed. Peak RAM here = ~1.5x total events size.
+message("\nAssembling all_drought_events from cfg_*.rds files...")
+all_events_list <- lapply(chunk_files, function(f) {
+  x <- readRDS(f)
+  if (is.null(x) || nrow(x) == 0L) return(NULL)
+  x
+})
+all_drought_events <- rbindlist(Filter(Negate(is.null), all_events_list),
+                                use.names = TRUE, fill = TRUE)
+rm(all_events_list); gc()
 
 # -- Save outputs -------------------------------------------------------------
 message("\n=== Saving outputs ===\n")
 
 saveRDS(all_drought_events, file.path(VOLUME_PATH, "all_drought_events.rds"))
+rm(all_drought_events); gc()
 message("  all_drought_events.rds           — full event list, all configs")
 
 if (nrow(drought_summary_yearly) > 0) {
-  write.csv(drought_summary_yearly, file.path(VOLUME_PATH, "drought_summary_yearly.csv"),
-            row.names = FALSE)
-  message("  drought_summary_yearly.csv       — yearly summary per country per config")
+  saveRDS(drought_summary_yearly,
+          file.path(VOLUME_PATH, "drought_summary_yearly_ref.rds"))
+  message("  drought_summary_yearly_ref.rds   — yearly summary per country per config (ERA5 reference)")
 }
 
 if (nrow(drought_annual_summary) > 0) {
-  write.csv(drought_annual_summary, file.path(VOLUME_PATH, "drought_annual_summary.csv"),
-            row.names = FALSE)
-  message("  drought_annual_summary.csv       — one row per config per country")
+  # Named _ref: ERA5 historical period = reference for scripts 06/07 Friedman analysis.
+  # drought_annual_summary_comp.rds will be produced in Phase 3 from CMIP6 runs.
+  saveRDS(drought_annual_summary,
+          file.path(VOLUME_PATH, "drought_annual_summary_ref.rds"))
+  message("  drought_annual_summary_ref.rds   — one row per config per country (ERA5 reference)")
 }
 
-message("\n=== Script 06 complete ===")
+message("\n=== Script 03 complete ===")
 message("Next: Script 07 (sanity checks and visual inspection of detected events)")

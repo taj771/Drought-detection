@@ -128,7 +128,7 @@ era5_normals <- tbl(sc, in_catalog(catalog_name, project_folder,
                                    "drought_index_dailysummary"))
 
 monthly_spark <- era5_normals |>
-  group_by(x, y, year, month) |>
+  group_by(x, y, country, year, month) |>
   summarise(
     monthly_precip = sum(precip, na.rm = TRUE),
     n_days_missing = sum(as.integer(is.na(precip))),

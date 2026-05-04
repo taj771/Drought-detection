@@ -29,10 +29,7 @@ library(SPEI)
 # -- Databricks connection ----------------------------------------------------
 # Connects to the Databricks cluster where ERA5 data is stored.
 # Cluster ID read from environment variable (set in .Renviron or Databricks env).
-sc <- spark_connect(
-  cluster_id = Sys.getenv("DATABRICKS_CLUSTER_ID"),
-  method = "databricks_connect"
-)
+sc <- spark_connect(method = "databricks")
 
 
 # -- Data source --------------------------------------------------------------
@@ -66,7 +63,7 @@ era5_normals %>%
 # All computation stays in Spark — avoids pulling raw daily data into R memory.
 # Months with 5+ missing days excluded as a data quality guard.
 monthly_spark <- era5_normals %>%
-  group_by(x, y, year, month) %>%
+  group_by(x, y, country, year, month) %>%
   summarise(
     monthly_precip    = sum(precip, na.rm = TRUE),
     mean_temp_monthly = mean(mean_temp, na.rm = TRUE),  # retained for SPEI (Script 02)

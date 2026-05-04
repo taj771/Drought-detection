@@ -20,6 +20,8 @@ sync:
     - "*.tex"
     - "*.png"
     - "*.jpg"
+    - "*.rds"
+    - "Data/**"
     - "typings/**"
 
 targets:
