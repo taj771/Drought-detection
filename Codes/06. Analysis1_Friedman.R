@@ -129,11 +129,18 @@ run_friedman_nemenyi <- function(wide_mat, characteristic, calibrated = FALSE) {
 
   avg_ranks <- sort(colMeans(rank_mat, na.rm = TRUE))
 
-  # Friedman statistic
-  # Q = [12 / (n*k*(k+1))] * sum(R_j^2) - 3*n*(k+1)
+  # Friedman statistic with ties correction
+  # Q_raw = [12 / (n*k*(k+1))] * sum(R_j^2) - 3*n*(k+1)
+  # C_ties = sum(t^3 - t) / (n * k * (k^2 - 1))  where t = tie group sizes per row
   R_j   <- colSums(rank_mat, na.rm = TRUE)
-  Q     <- (12 / (n_obs * n_configs * (n_configs + 1))) * sum(R_j^2) -
+  Q_raw <- (12 / (n_obs * n_configs * (n_configs + 1))) * sum(R_j^2) -
             3 * n_obs * (n_configs + 1)
+
+  tie_correction <- mean(apply(wide_mat, 1, function(row) {
+    tbl <- table(row[!is.na(row)])
+    sum(tbl^3 - tbl) / (n_configs * (n_configs^2 - 1))
+  }))
+  Q     <- if (tie_correction < 1) Q_raw / (1 - tie_correction) else Q_raw
   df    <- n_configs - 1
   p_val <- pchisq(Q, df = df, lower.tail = FALSE)
 
@@ -215,47 +222,42 @@ run_friedman_nemenyi <- function(wide_mat, characteristic, calibrated = FALSE) {
 
 assign_equivalence_groups <- function(config_names, nemenyi_pairs, all_pairs) {
 
-  # Start: every config in its own group
-  groups <- setNames(seq_along(config_names), config_names)
-
   if (nrow(nemenyi_pairs) == 0) {
-    # No significant pairs → all equivalent
-    df <- data.frame(config_id = config_names,
-                     equiv_group = 1L,
-                     stringsAsFactors = FALSE)
-    return(df)
+    return(data.frame(config_id = config_names, equiv_group = 1L,
+                      stringsAsFactors = FALSE))
   }
 
-  # Significant pairs = DIFFERENT. Non-significant = SAME group.
+  # Build non-significant (equivalent) edges — connected components = same group.
   sig_set <- paste(nemenyi_pairs$config_a, nemenyi_pairs$config_b, sep = "||")
 
-  find_root <- function(g, x) {
-    while (g[x] != which(names(g) == x)) {
-      parent <- names(g)[g[x]]
-      x      <- parent
+  # Union-find with path compression
+  parent <- setNames(config_names, config_names)
+
+  find <- function(x) {
+    while (parent[x] != x) {
+      parent[x] <<- parent[parent[x]]  # path compression (two-step)
+      x <- parent[x]
     }
-    which(names(g) == x)
+    x
   }
 
-  # Union non-significant pairs
+  union <- function(a, b) {
+    ra <- find(a); rb <- find(b)
+    if (ra != rb) parent[rb] <<- ra
+  }
+
   for (pair in all_pairs) {
     key <- paste(pair[1], pair[2], sep = "||")
-    if (!key %in% sig_set) {
-      # Union
-      ra <- groups[pair[1]]
-      rb <- groups[pair[2]]
-      if (ra != rb) groups[groups == rb] <- ra
-    }
+    if (!key %in% sig_set) union(pair[1], pair[2])
   }
 
-  # Relabel groups 1, 2, 3...
-  unique_groups <- unique(groups)
-  relabel       <- setNames(seq_along(unique_groups), unique_groups)
-  groups_final  <- relabel[as.character(groups)]
+  roots       <- vapply(config_names, find, character(1))
+  unique_roots <- unique(roots)
+  relabel     <- setNames(seq_along(unique_roots), unique_roots)
 
   data.frame(
-    config_id   = names(groups_final),
-    equiv_group = unname(groups_final),
+    config_id   = config_names,
+    equiv_group = unname(relabel[roots]),
     stringsAsFactors = FALSE
   )
 }
@@ -282,8 +284,6 @@ characteristics <- list(
   )
 )
 
-annual_cal <- apply_calibration(annual_ref)
-
 all_friedman    <- list()
 all_nemenyi     <- list()
 all_avg_ranks   <- list()
@@ -293,17 +293,30 @@ for (ctry in countries) {
 
   cat(sprintf("\n=== Country: %s ===\n", ctry))
 
-  ctry_df <- annual_cal %>% filter(country == ctry)
+  # D1 fix: Friedman always uses RAW values. Calibration applied only for the
+  # calibrated-reporting pass — never before the rank matrix is built.
+  ctry_raw <- annual_ref %>% filter(country == ctry)
+  ctry_cal <- apply_calibration(ctry_raw)
 
   for (cal_pass in c("raw", "calibrated")) {
 
     char_cols <- if (cal_pass == "raw") characteristics$raw else characteristics$cal
     is_cal    <- cal_pass == "calibrated"
+    ctry_df   <- if (cal_pass == "raw") ctry_raw else ctry_cal
 
     for (char_name in names(char_cols)) {
 
       col <- char_cols[char_name]
       cat(sprintf("  [%s] %s ... ", cal_pass, char_name))
+
+      # Guard: duplicate config/year rows would silently average in pivot_wider.
+      n_dupes <- nrow(ctry_df) -
+        nrow(unique(ctry_df[, c("config_id", "event_year")]))
+      if (n_dupes > 0) {
+        warning(sprintf(
+          "%s [%s] %s: %d duplicate config/year rows — check upstream data",
+          ctry, cal_pass, char_name, n_dupes))
+      }
 
       # Wide matrix: rows = years, cols = configs
       wide <- ctry_df %>%

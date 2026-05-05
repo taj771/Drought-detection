@@ -77,7 +77,8 @@ message("\n=== Step 1: Percentage change ref → comparison ===")
 period_means <- function(df, period_label) {
   df %>%
     group_by(config_id, country) %>%
-    summarise(across(all_of(unname(char_cols)), mean, na.rm = TRUE),
+    summarise(across(all_of(unname(char_cols)),
+                     \(x) mean(x, na.rm = TRUE)),
               .groups = "drop") %>%
     mutate(period = period_label)
 }
@@ -113,7 +114,7 @@ pct_change_all <- map_dfr(names(char_cols), function(char_name) {
     )
 })
 
-cat(sprintf("% change rows: %d\n", nrow(pct_change_all)))
+cat(sprintf("%% change rows: %d\n", nrow(pct_change_all)))
 saveRDS(pct_change_all, file.path(VOLUME_PATH, "analysis2_pct_change.rds"))
 message("Saved: analysis2_pct_change.rds")
 

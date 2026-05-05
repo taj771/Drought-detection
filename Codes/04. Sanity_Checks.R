@@ -41,6 +41,7 @@
 library(dplyr)
 library(ggplot2)
 library(purrr)
+library(patchwork)
 library(lubridate)
 library(terra)
 library(sf)
@@ -48,13 +49,18 @@ library(rnaturalearth)
 library(rnaturalearthdata)
 
 
+# -- Paths --------------------------------------------------------------------
+VOLUME_PATH  <- "/Volumes/projects/gwsc_drought/drought_outputs"
+FIGURES_PATH <- file.path(VOLUME_PATH, "Figures")
+
+
 # -- Load data ----------------------------------------------------------------
 message("Loading detection outputs...")
 
-events     <- readRDS("./Data/all_drought_events.rds")
-spi_data   <- readRDS("./Data/spi_results.rds")
+events   <- readRDS(file.path(VOLUME_PATH, "all_drought_events.rds"))
+spi_data <- readRDS(file.path(VOLUME_PATH, "spi_results.rds"))
 
-dir.create("./Figures", showWarnings = FALSE)
+dir.create(FIGURES_PATH, showWarnings = FALSE, recursive = TRUE)
 
 events$start_date <- as.Date(events$start_date)
 events$end_date   <- as.Date(events$end_date)
@@ -124,10 +130,10 @@ plots <- Filter(Negate(is.null), plots)
 
 if (length(plots) > 0) {
   p_combined <- patchwork::wrap_plots(plots, ncol = 2)
-  ggplot2::ggsave("./Figures/sanity_check1_events_sample.png",
+  ggplot2::ggsave(file.path(FIGURES_PATH, "sanity_check1_events_sample.png"),
                   p_combined, width = 14, height = 10, dpi = 150)
-  message(sprintf("  Saved %d event plots -> ./Figures/sanity_check1_events_sample.png",
-                  length(plots)))
+  message(sprintf("  Saved %d event plots -> %s/sanity_check1_events_sample.png",
+                  length(plots), FIGURES_PATH))
 } else {
   message("  No plots generated — check index column names match spi_data.")
 }
@@ -158,9 +164,10 @@ if ("country" %in% names(events)) {
   )
 }
 
-write.csv(extreme_events, "./Figures/sanity_check2_extreme_durations.csv",
+write.csv(extreme_events,
+          file.path(FIGURES_PATH, "sanity_check2_extreme_durations.csv"),
           row.names = FALSE)
-message("  Saved -> ./Figures/sanity_check2_extreme_durations.csv")
+message("  Saved -> sanity_check2_extreme_durations.csv")
 message("  Review this file: very long events (>24 months) should be inspected manually.")
 print(head(extreme_events, 10))
 
@@ -264,9 +271,9 @@ p_zero <- ggplot() +
   coord_sf(expand = FALSE) +
   theme_minimal(base_size = 11)
 
-ggsave("./Figures/sanity_check4_zero_pixels_map.png",
+ggsave(file.path(FIGURES_PATH, "sanity_check4_zero_pixels_map.png"),
        p_zero, width = 12, height = 6, dpi = 150)
-message("  Saved -> ./Figures/sanity_check4_zero_pixels_map.png")
+message("  Saved -> sanity_check4_zero_pixels_map.png")
 
 
 # =============================================================================
@@ -278,8 +285,70 @@ message("  Saved -> ./Figures/sanity_check4_zero_pixels_map.png")
 # =============================================================================
 message("\n=== Check 5: Symmetric threshold test ===")
 
-# Source detect_droughts function from script 03
-source("03. Drought_Detection.R")  # loads detect_droughts() into environment
+# detect_droughts() copied from script 03 — sourcing script 03 directly would
+# re-run the entire 75-config detection loop and overwrite outputs.
+detect_droughts <- function(index_vec, dates, method, start_thr, min_duration) {
+  if (length(dates) != length(index_vec))
+    stop("'dates' and 'index_vec' must be same length")
+  dates     <- as.Date(dates)
+  valid_idx <- which(!is.na(index_vec) & !is.nan(index_vec))
+  if (length(valid_idx) < min_duration) return(data.frame())
+  iv <- index_vec[valid_idx]
+  dt <- dates[valid_idx]
+  n  <- length(iv)
+  if (method == "threshold") {
+    below      <- iv < start_thr
+    if (!any(below)) return(data.frame())
+    rl         <- rle(below)
+    run_ends   <- cumsum(rl$lengths)
+    run_starts <- c(1L, run_ends[-length(run_ends)] + 1L)
+    event_runs <- which(rl$values & rl$lengths >= min_duration)
+    if (length(event_runs) == 0L) return(data.frame())
+    events_list <- lapply(seq_along(event_runs), function(e_i) {
+      r  <- event_runs[e_i]; si <- run_starts[r]; ei <- run_ends[r]
+      ev_v <- iv[si:ei]; ev_d <- dt[si:ei]; cs <- cumsum(ev_v)
+      data.frame(drought_id = e_i, start_date = ev_d[1L],
+                 end_date = ev_d[length(ev_d)],
+                 duration_months = length(ev_d), entry_index = ev_v[1L],
+                 peak_index = min(ev_v), peak_date = ev_d[which.min(ev_v)],
+                 cum_deficit_neg = sum(ev_v[ev_v < 0]),
+                 total_severity = sum(ev_v), min_cum_deficit = min(cs),
+                 stringsAsFactors = FALSE)
+    })
+    events <- do.call(rbind, events_list)
+  } else {
+    events_list <- list(); drought_id <- 0L; i <- 1L
+    while (i <= n) {
+      if (iv[i] >= start_thr) { i <- i + 1L; next }
+      cs <- cumsum(iv[i:n]); r <- which(cs >= 0L)[1L]
+      if (is.na(r)) {
+        ev_v <- iv[i:n]; ev_d <- dt[i:n]; i <- n + 1L
+      } else {
+        ev_end <- i + r - 2L
+        if (ev_end < i) { i <- i + r; next }
+        ev_v <- iv[i:ev_end]; ev_d <- dt[i:ev_end]; i <- i + r
+      }
+      if (length(ev_v) == 0L) next
+      drought_id <- drought_id + 1L; cs_ev <- cumsum(ev_v)
+      events_list[[drought_id]] <- data.frame(
+        drought_id = drought_id, start_date = ev_d[1L],
+        end_date = ev_d[length(ev_d)], duration_months = length(ev_d),
+        entry_index = ev_v[1L], peak_index = min(ev_v),
+        peak_date = ev_d[which.min(ev_v)],
+        cum_deficit_neg = sum(ev_v[ev_v < 0]), total_severity = sum(ev_v),
+        min_cum_deficit = min(cs_ev), stringsAsFactors = FALSE)
+    }
+    if (drought_id == 0L) return(data.frame())
+    events <- do.call(rbind, events_list)
+  }
+  events$severity_class <- dplyr::case_when(
+    events$peak_index >= -1.0                              ~ "Mild",
+    events$peak_index >= -1.5 & events$peak_index < -1.0 ~ "Moderate",
+    events$peak_index >= -2.0 & events$peak_index < -1.5 ~ "Severe",
+    events$peak_index <  -2.0                             ~ "Extreme"
+  )
+  return(events)
+}
 
 # Use one pixel — first available in spi_data with enough data
 test_pixel <- spi_data[spi_data$x == spi_data$x[1] & spi_data$y == spi_data$y[1], ]
@@ -313,8 +382,8 @@ if (nrow(sym_events) == 0) {
     message("  Check 5 PASSED — no zero-duration or infinite events.")
   }
 
-  saveRDS(sym_events, "./Data/sanity_check5_symmetric_test.rds")
-  message("  Saved -> ./Data/sanity_check5_symmetric_test.rds")
+  saveRDS(sym_events, file.path(VOLUME_PATH, "sanity_check5_symmetric_test.rds"))
+  message("  Saved -> sanity_check5_symmetric_test.rds")
 }
 
 

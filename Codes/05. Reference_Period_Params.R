@@ -36,8 +36,8 @@ library(purrr)
 CALIB_START <- 1970
 CALIB_END   <- 1999
 CATALOG     <- "projects"
-SCHEMA      <- "gwsc_drought"        # update if schema name differs
-TABLE       <- "era5_monthly"         # update if table name differs
+SCHEMA      <- "xx_drought_index"    # same schema as scripts 01/02a/02b
+TABLE       <- "drought_index_dailysummary"  # daily table — aggregate below
 VOLUME_PATH <- "/Volumes/projects/gwsc_drought/drought_outputs"  # Unity Catalog Volume
 
 cat(sprintf("Reference period: %d–%d\n", CALIB_START, CALIB_END))
@@ -50,25 +50,24 @@ sc <- spark_connect(method = "databricks")
 
 
 # -- Load and aggregate ERA5 monthly data -------------------------------------
-# Table should already be monthly-aggregated. If daily, uncomment group_by block.
+# Same daily table as scripts 01/02a/02b. Filter to 6 study countries,
+# aggregate precip to monthly. pet_monthly = NA (not in daily table — SPEI
+# log-logistic params require water balance; script uses precip only for gamma).
+COUNTRY_FILTER <- c("Argentina", "Benin", "Thailand",
+                    "Greece", "Mexico", "South Africa")
+
 era5_raw <- tbl(sc, in_catalog(CATALOG, SCHEMA, TABLE))
 
-# If table is already monthly (year, month, x, y, monthly_precip, pet_monthly):
 monthly_r <- era5_raw %>%
-  select(x, y, year, month, monthly_precip, pet_monthly) %>%
+  filter(country %in% COUNTRY_FILTER) %>%
+  group_by(x, y, country, year, month) %>%
+  summarise(
+    monthly_precip = sum(precip,           na.rm = TRUE),
+    n_days_missing = sum(as.integer(is.na(precip))),
+    .groups        = "drop"
+  ) %>%
+  filter(n_days_missing < 5) %>%
   collect()
-
-# If table is daily, replace above with:
-# monthly_r <- era5_raw %>%
-#   group_by(x, y, year, month) %>%
-#   summarise(
-#     monthly_precip = sum(precip,     na.rm = TRUE),
-#     pet_monthly    = sum(pet,        na.rm = TRUE),
-#     n_days_missing = sum(as.integer(is.na(precip))),
-#     .groups = "drop"
-#   ) %>%
-#   filter(n_days_missing < 5) %>%
-#   collect()
 
 monthly_r <- monthly_r %>% arrange(x, y, year, month)
 
@@ -97,7 +96,7 @@ extract_gamma_params <- function(pixel_df, calib_end = CALIB_END) {
 
   results <- list()
 
-  for (sc_val in c(1, 3, 6)) {
+  for (sc_val in c(1, 3, 6, 12)) {
 
     min_obs <- max(sc_val * 4, 24)
     if (sum(!is.na(precip_vec[calib_idx])) < min_obs) next
@@ -160,7 +159,7 @@ extract_loglogistic_params <- function(pixel_df, calib_end = CALIB_END) {
 
   results <- list()
 
-  for (sc_val in c(1, 3, 6)) {
+  for (sc_val in c(1, 3, 6, 12)) {
 
     min_obs <- max(sc_val * 4, 24)
     if (sum(!is.na(wb_vec[calib_idx])) < min_obs) next
@@ -256,8 +255,9 @@ apply_gamma_params <- function(pixel_df, params_all) {
 
       pixel_df[[col_name]] <- spi_vals
     }, error = function(e) {
-      cat(sprintf("  Apply Gamma error x=%.3f y=%.3f scale=%d: %s\n", px, py, sc_val, e$message))
-      pixel_df[[col_name]] <<- NA_real_
+      cat(sprintf("  Apply Gamma error x=%.3f y=%.3f scale=%d: %s\n",
+                  px, py, sc_val, e$message))
+      pixel_df[[col_name]] <- NA_real_
     })
   }
 
@@ -332,8 +332,9 @@ apply_loglogistic_params <- function(pixel_df, params_all) {
 
       pixel_df[[col_name]] <- spei_vals
     }, error = function(e) {
-      cat(sprintf("  Apply LogLogistic error x=%.3f y=%.3f scale=%d: %s\n", px, py, sc_val, e$message))
-      pixel_df[[col_name]] <<- NA_real_
+      cat(sprintf("  Apply LogLogistic error x=%.3f y=%.3f scale=%d: %s\n",
+                  px, py, sc_val, e$message))
+      pixel_df[[col_name]] <- NA_real_
     })
   }
 
