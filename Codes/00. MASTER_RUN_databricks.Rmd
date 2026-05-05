@@ -26,8 +26,8 @@ RUN_SPEI_T     <- FALSE  # Script 02a: SPEI Thornthwaite — DONE with country f
 RUN_SPEI_P     <- FALSE  # Script 02b: SPEI Penman-Monteith — DONE with country fix 2026-05-04
 RUN_DETECTION  <- FALSE  # Script 03: Drought detection — DONE 2026-05-05
 RUN_SANITY     <- FALSE  # Script 04: Sanity checks — DONE 2026-05-05
-RUN_REF_PARAMS <- TRUE   # Script 05: Freeze reference period params
-RUN_FRIEDMAN   <- FALSE  # Script 06: Analysis 1 — Friedman + Nemenyi
+RUN_REF_PARAMS <- FALSE  # Script 05: Freeze reference period params — DONE 2026-05-05
+RUN_FRIEDMAN   <- TRUE   # Script 06: Analysis 1 — Friedman + Nemenyi
 RUN_CROSSPERIOD <- FALSE # Script 07: Analysis 2 — cross-period comparison
 RUN_APPENDIX   <- FALSE  # Script 08: Appendix A1 figure
 ```
