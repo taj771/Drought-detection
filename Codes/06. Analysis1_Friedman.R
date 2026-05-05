@@ -45,14 +45,34 @@ P_THRESHOLD  <- 0.05
 
 
 # -- Load data ----------------------------------------------------------------
-message("Loading reference period annual summary...")
-annual_ref <- readRDS(file.path(VOLUME_PATH, "drought_annual_summary_ref.rds"))
+# drought_summary_yearly_ref.rds has one row per config × country × year
+# (produced by script 03). drought_annual_summary_ref.rds is the aggregated
+# version (no event_year) — Friedman needs per-year rows so use the yearly file.
+message("Loading reference period yearly summary...")
+annual_ref_raw <- readRDS(file.path(VOLUME_PATH, "drought_summary_yearly_ref.rds"))
 
-# Expected columns: config_id, country, event_year, annual_freq_events,
-# annual_mean_duration, annual_mean_peak, cv_freq, annual_pct_pixels
-# Filter to reference period
-annual_ref <- annual_ref %>%
+# Rename script-03 columns to script-06 expected names
+annual_ref <- annual_ref_raw %>%
+  rename(
+    annual_freq_events   = mean_events_per_pixel,
+    annual_mean_duration = mean_duration_months,
+    annual_mean_peak     = mean_peak_index,
+    annual_pct_pixels    = pct_pixels_affected
+  ) %>%
   filter(event_year >= REF_START, event_year <= REF_END)
+
+# Compute cv_freq (CV of annual frequency) per config × country across years
+cv_lookup <- annual_ref %>%
+  group_by(config_id, country) %>%
+  summarise(
+    cv_freq = round(sd(annual_freq_events, na.rm = TRUE) /
+                    max(mean(annual_freq_events, na.rm = TRUE), 1e-9), 3),
+    .groups = "drop"
+  )
+annual_ref <- annual_ref %>%
+  left_join(cv_lookup, by = c("config_id", "country"))
+
+rm(annual_ref_raw)
 
 n_years   <- length(unique(annual_ref$event_year))
 n_configs <- length(unique(annual_ref$config_id))
