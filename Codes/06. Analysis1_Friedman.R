@@ -340,7 +340,7 @@ for (ctry in countries) {
 
       # Wide matrix: rows = years, cols = configs
       wide <- ctry_df %>%
-        select(config_id, event_year, value = all_of(col)) %>%
+        select(config_id, event_year, value = all_of(unname(col))) %>%
         pivot_wider(names_from = config_id, values_from = value,
                     values_fn = mean) %>%
         arrange(event_year) %>%
