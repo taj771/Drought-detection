@@ -43,8 +43,8 @@ library(ggplot2)
 library(purrr)
 library(patchwork)
 library(lubridate)
-library(terra)
 library(sf)
+library(terra)
 library(rnaturalearth)
 library(rnaturalearthdata)
 
@@ -54,10 +54,28 @@ VOLUME_PATH  <- "/Volumes/projects/gwsc_drought/drought_outputs"
 FIGURES_PATH <- file.path(VOLUME_PATH, "Figures")
 
 
+# Helper: log error to Volume and print — does NOT stop execution
+.log_check_error <- function(check_name, e) {
+  msg <- paste0(check_name, " ERROR at ", Sys.time(), "\n", conditionMessage(e))
+  log_path <- file.path(VOLUME_PATH, "script04_error.txt")
+  cat(msg, file = log_path, append = TRUE)
+  message(sprintf("  ERROR in %s: %s", check_name, conditionMessage(e)))
+}
+
+
 # -- Load data ----------------------------------------------------------------
 message("Loading detection outputs...")
 
-events   <- readRDS(file.path(VOLUME_PATH, "all_drought_events.rds"))
+events_full <- readRDS(file.path(VOLUME_PATH, "all_drought_events.rds"))
+
+# Keep only columns needed across all 5 checks — drops ~60% of RAM
+KEEP_COLS <- c("x", "y", "country", "config_id", "index", "method",
+               "start_thr", "start_date", "end_date", "duration_months",
+               "peak_index", "severity_class", "event_year")
+keep_present <- KEEP_COLS[KEEP_COLS %in% names(events_full)]
+events <- events_full[, keep_present]
+rm(events_full); gc()
+
 spi_data <- readRDS(file.path(VOLUME_PATH, "spi_results.rds"))
 
 dir.create(FIGURES_PATH, showWarnings = FALSE, recursive = TRUE)
@@ -74,69 +92,54 @@ events$end_date   <- as.Date(events$end_date)
 # =============================================================================
 message("\n=== Check 1: Visual event inspection ===")
 
-set.seed(42)
-sample_events <- events |>
-  filter(!is.na(x), !is.na(y), !is.na(config_id)) |>
-  slice_sample(n = min(6, nrow(events)))
+tryCatch({
+  set.seed(42)
+  sample_events <- events |>
+    filter(!is.na(x), !is.na(y), !is.na(config_id)) |>
+    slice_sample(n = min(6, nrow(events)))
 
-plots <- purrr::map(seq_len(nrow(sample_events)), function(i) {
-
-  ev    <- sample_events[i, ]
-  px    <- ev$x
-  py    <- ev$y
-  idx   <- ev$index
-  thr   <- ev$start_thr
-  cfgid <- ev$config_id
-
-  # Get pixel time series for this index
-  pixel_ts <- spi_data[spi_data$x == px & spi_data$y == py, ]
-  pixel_ts  <- pixel_ts[order(pixel_ts$year, pixel_ts$month), ]
-
-  if (!idx %in% names(pixel_ts)) {
-    message(sprintf("  Skipping event %d — index '%s' not in spi_data", i, idx))
-    return(NULL)
+  plots <- purrr::map(seq_len(nrow(sample_events)), function(i) {
+    ev    <- sample_events[i, ]
+    px    <- ev$x; py <- ev$y; idx <- ev$index
+    thr   <- ev$start_thr; cfgid <- ev$config_id
+    pixel_ts <- spi_data[spi_data$x == px & spi_data$y == py, ]
+    pixel_ts  <- pixel_ts[order(pixel_ts$year, pixel_ts$month), ]
+    if (!idx %in% names(pixel_ts)) {
+      message(sprintf("  Skipping event %d — index '%s' not in spi_data", i, idx))
+      return(NULL)
+    }
+    pixel_ts$date      <- as.Date(paste(pixel_ts$year, pixel_ts$month, "01", sep = "-"))
+    pixel_ts$index_val <- pixel_ts[[idx]]
+    window_start <- ev$start_date %m-% months(12)
+    window_end   <- ev$end_date   %m+% months(12)
+    plot_ts <- pixel_ts[pixel_ts$date >= window_start & pixel_ts$date <= window_end, ]
+    if (nrow(plot_ts) < 3) return(NULL)
+    ggplot(plot_ts, aes(x = date, y = index_val)) +
+      geom_col(aes(fill = index_val < thr), show.legend = FALSE) +
+      scale_fill_manual(values = c("FALSE" = "steelblue", "TRUE" = "firebrick")) +
+      geom_hline(yintercept = thr, linetype = "dashed", colour = "red", linewidth = 0.8) +
+      geom_vline(xintercept = as.numeric(ev$start_date),
+                 colour = "darkred", linetype = "solid", linewidth = 0.8) +
+      geom_vline(xintercept = as.numeric(ev$end_date),
+                 colour = "darkred", linetype = "dotted", linewidth = 0.8) +
+      labs(title = sprintf("Config: %s | Pixel: (%.3f, %.3f)", cfgid, px, py),
+           subtitle = sprintf("Onset: %s | End: %s | Duration: %d months | Severity: %s",
+                              ev$start_date, ev$end_date,
+                              ev$duration_months, ev$severity_class),
+           x = NULL, y = idx) +
+      theme_minimal(base_size = 10)
+  })
+  plots <- Filter(Negate(is.null), plots)
+  if (length(plots) > 0) {
+    p_combined <- patchwork::wrap_plots(plots, ncol = 2)
+    ggplot2::ggsave(file.path(FIGURES_PATH, "sanity_check1_events_sample.png"),
+                    p_combined, width = 14, height = 10, dpi = 150)
+    message(sprintf("  Saved %d event plots -> sanity_check1_events_sample.png",
+                    length(plots)))
+  } else {
+    message("  No plots generated — check index column names match spi_data.")
   }
-
-  pixel_ts$date      <- as.Date(paste(pixel_ts$year, pixel_ts$month, "01", sep = "-"))
-  pixel_ts$index_val <- pixel_ts[[idx]]
-
-  # Show ±12 months around event
-  window_start <- ev$start_date %m-% months(12)
-  window_end   <- ev$end_date   %m+% months(12)
-  plot_ts <- pixel_ts[pixel_ts$date >= window_start &
-                        pixel_ts$date <= window_end, ]
-
-  if (nrow(plot_ts) < 3) return(NULL)
-
-  ggplot(plot_ts, aes(x = date, y = index_val)) +
-    geom_col(aes(fill = index_val < thr), show.legend = FALSE) +
-    scale_fill_manual(values = c("FALSE" = "steelblue", "TRUE" = "firebrick")) +
-    geom_hline(yintercept = thr, linetype = "dashed", colour = "red", linewidth = 0.8) +
-    geom_vline(xintercept = as.numeric(ev$start_date),
-               colour = "darkred", linetype = "solid", linewidth = 0.8) +
-    geom_vline(xintercept = as.numeric(ev$end_date),
-               colour = "darkred", linetype = "dotted", linewidth = 0.8) +
-    labs(
-      title = sprintf("Config: %s | Pixel: (%.3f, %.3f)", cfgid, px, py),
-      subtitle = sprintf("Onset: %s | End: %s | Duration: %d months | Severity: %s",
-                         ev$start_date, ev$end_date,
-                         ev$duration_months, ev$severity_class),
-      x = NULL, y = idx
-    ) +
-    theme_minimal(base_size = 10)
-})
-
-plots <- Filter(Negate(is.null), plots)
-
-if (length(plots) > 0) {
-  p_combined <- patchwork::wrap_plots(plots, ncol = 2)
-  ggplot2::ggsave(file.path(FIGURES_PATH, "sanity_check1_events_sample.png"),
-                  p_combined, width = 14, height = 10, dpi = 150)
-  message(sprintf("  Saved %d event plots -> sanity_check1_events_sample.png",
-                  length(plots)))
-} else {
-  message("  No plots generated — check index column names match spi_data.")
-}
+}, error = function(e) .log_check_error("Check 1", e))
 
 
 # =============================================================================
@@ -146,30 +149,33 @@ if (length(plots) > 0) {
 # =============================================================================
 message("\n=== Check 2: Extreme duration check ===")
 
-duration_99 <- quantile(events$duration_months, 0.99, na.rm = TRUE)
-extreme_events <- events |>
-  filter(duration_months >= duration_99) |>
-  arrange(desc(duration_months)) |>
-  select(config_id, index, method, start_thr, x, y,
-         start_date, end_date, duration_months, peak_index, severity_class)
+tryCatch({
+  duration_99 <- quantile(events$duration_months, 0.99, na.rm = TRUE)
+  extreme_events <- events |>
+    filter(duration_months >= duration_99) |>
+    arrange(desc(duration_months)) |>
+    select(any_of(c("config_id", "index", "method", "start_thr", "x", "y",
+                    "start_date", "end_date", "duration_months",
+                    "peak_index", "severity_class")))
 
-message(sprintf("  99th percentile duration: %d months", duration_99))
-message(sprintf("  Events at/above 99th pct: %d", nrow(extreme_events)))
+  message(sprintf("  99th percentile duration: %d months", duration_99))
+  message(sprintf("  Events at/above 99th pct: %d", nrow(extreme_events)))
 
-if ("country" %in% names(events)) {
-  extreme_events <- merge(
-    extreme_events,
-    unique(events[, c("x", "y", "country")]),
-    by = c("x", "y"), all.x = TRUE
-  )
-}
+  if ("country" %in% names(events)) {
+    extreme_events <- merge(
+      extreme_events,
+      unique(events[, c("x", "y", "country")]),
+      by = c("x", "y"), all.x = TRUE
+    )
+  }
 
-write.csv(extreme_events,
-          file.path(FIGURES_PATH, "sanity_check2_extreme_durations.csv"),
-          row.names = FALSE)
-message("  Saved -> sanity_check2_extreme_durations.csv")
-message("  Review this file: very long events (>24 months) should be inspected manually.")
-print(head(extreme_events, 10))
+  write.csv(extreme_events,
+            file.path(FIGURES_PATH, "sanity_check2_extreme_durations.csv"),
+            row.names = FALSE)
+  message("  Saved -> sanity_check2_extreme_durations.csv")
+  message("  Review this file: very long events (>24 months) should be inspected manually.")
+  print(head(extreme_events, 10))
+}, error = function(e) .log_check_error("Check 2", e))
 
 
 # =============================================================================
@@ -181,49 +187,50 @@ print(head(extreme_events, 10))
 # =============================================================================
 message("\n=== Check 3: Known drought cross-check ===")
 
-# Well-documented drought years per country (from literature / GWSC records)
-known_droughts <- data.frame(
-  country    = c("Thailand", "Argentina", "South Africa", "Benin", "Mexico", "Greece"),
-  drought_yr = c(1979,        1995,         1992,           1983,    1982,     1989),
-  stringsAsFactors = FALSE
-)
+tryCatch({
+  known_droughts <- data.frame(
+    country    = c("Thailand", "Argentina", "South Africa", "Benin", "Mexico", "Greece"),
+    drought_yr = c(1979,        1995,         1992,           1983,    1982,     1989),
+    stringsAsFactors = FALSE
+  )
 
-if (!"country" %in% names(events) || !"event_year" %in% names(events)) {
-  message("  'country' or 'event_year' column missing — skipping Check 3.")
-} else {
-  check3 <- purrr::map_dfr(seq_len(nrow(known_droughts)), function(i) {
-    ctry <- known_droughts$country[i]
-    yr   <- known_droughts$drought_yr[i]
-
-    ev_yr <- events[events$country == ctry & events$event_year == yr &
-                      events$index == "spi6" & events$method == "threshold" &
-                      events$start_thr == -1.0, ]
-
-    n_pixels_total <- length(unique(paste(
-      events$x[events$country == ctry], events$y[events$country == ctry])))
-
-    n_pixels_drought <- length(unique(paste(ev_yr$x, ev_yr$y)))
-
-    data.frame(
-      country          = ctry,
-      known_drought_yr = yr,
-      n_events         = nrow(ev_yr),
-      pixels_affected  = n_pixels_drought,
-      total_pixels     = n_pixels_total,
-      pct_affected     = round(100 * n_pixels_drought / max(n_pixels_total, 1), 1),
-      pass             = n_pixels_drought > 0
-    )
-  })
-
-  print(check3)
-  failures <- check3[!check3$pass, ]
-  if (nrow(failures) > 0) {
-    message(sprintf("  WARNING: %d known drought years not detected:", nrow(failures)))
-    print(failures[, c("country", "known_drought_yr")])
+  if (!"country" %in% names(events) || !"event_year" %in% names(events)) {
+    message("  'country' or 'event_year' column missing — skipping Check 3.")
   } else {
-    message("  All known drought years detected. Check 3 PASSED.")
+    check3 <- purrr::map_dfr(seq_len(nrow(known_droughts)), function(i) {
+      ctry <- known_droughts$country[i]
+      yr   <- known_droughts$drought_yr[i]
+
+      ev_yr <- events[events$country == ctry & events$event_year == yr &
+                        events$index == "spi6" & events$method == "threshold" &
+                        events$start_thr == -1.0, ]
+
+      n_pixels_total <- length(unique(paste(
+        events$x[events$country == ctry], events$y[events$country == ctry])))
+
+      n_pixels_drought <- length(unique(paste(ev_yr$x, ev_yr$y)))
+
+      data.frame(
+        country          = ctry,
+        known_drought_yr = yr,
+        n_events         = nrow(ev_yr),
+        pixels_affected  = n_pixels_drought,
+        total_pixels     = n_pixels_total,
+        pct_affected     = round(100 * n_pixels_drought / max(n_pixels_total, 1), 1),
+        pass             = n_pixels_drought > 0
+      )
+    })
+
+    print(check3)
+    failures <- check3[!check3$pass, ]
+    if (nrow(failures) > 0) {
+      message(sprintf("  WARNING: %d known drought years not detected:", nrow(failures)))
+      print(failures[, c("country", "known_drought_yr")])
+    } else {
+      message("  All known drought years detected. Check 3 PASSED.")
+    }
   }
-}
+}, error = function(e) .log_check_error("Check 3", e))
 
 
 # =============================================================================
@@ -234,46 +241,45 @@ if (!"country" %in% names(events) || !"event_year" %in% names(events)) {
 # =============================================================================
 message("\n=== Check 4: Zero-output pixel check ===")
 
-all_pixels <- unique(spi_data[, c("x", "y")])
-active_pixels <- unique(events[, c("x", "y")])
+tryCatch({
+  all_pixels    <- unique(spi_data[, c("x", "y"), drop = FALSE])
+  active_pixels <- unique(events[,    c("x", "y"), drop = FALSE])
 
-zero_pixels <- merge(all_pixels, active_pixels,
-                     by = c("x", "y"), all.x = TRUE)
-zero_pixels$has_event <- paste(zero_pixels$x, zero_pixels$y) %in%
-  paste(active_pixels$x, active_pixels$y)
+  active_key           <- paste(active_pixels$x, active_pixels$y)
+  all_pixels$has_event <- paste(all_pixels$x, all_pixels$y) %in% active_key
 
-n_zero  <- sum(!zero_pixels$has_event)
-n_total <- nrow(zero_pixels)
-pct_zero <- round(100 * n_zero / n_total, 1)
+  n_zero   <- sum(!all_pixels$has_event)
+  n_total  <- nrow(all_pixels)
+  pct_zero <- round(100 * n_zero / n_total, 1)
 
-message(sprintf("  Total pixels : %d", n_total))
-message(sprintf("  Zero-event   : %d (%.1f%%)", n_zero, pct_zero))
+  message(sprintf("  Total pixels : %d", n_total))
+  message(sprintf("  Zero-event   : %d (%.1f%%)", n_zero, pct_zero))
 
-if (pct_zero > 50) {
-  message("  WARNING: >50%% of pixels have zero events — possible silent failure.")
-} else {
-  message("  Zero-pixel rate looks reasonable. Check 4 PASSED.")
-}
+  if (pct_zero > 50) {
+    message("  WARNING: >50%% of pixels have zero events — possible silent failure.")
+  } else {
+    message("  Zero-pixel rate looks reasonable. Check 4 PASSED.")
+  }
 
-# Map zero pixels
-world <- ne_countries(scale = "medium", returnclass = "sf")
+  world <- ne_countries(scale = "medium", returnclass = "sf")
 
-p_zero <- ggplot() +
-  geom_sf(data = world, fill = "grey90", colour = "white", linewidth = 0.2) +
-  geom_point(data = zero_pixels[!zero_pixels$has_event, ],
-             aes(x = x, y = y), colour = "firebrick", size = 0.3, alpha = 0.5) +
-  geom_point(data = zero_pixels[zero_pixels$has_event, ],
-             aes(x = x, y = y), colour = "steelblue", size = 0.3, alpha = 0.2) +
-  labs(title = "Check 4: Zero-event pixels (red) vs pixels with events (blue)",
-       subtitle = sprintf("%d of %d pixels (%.1f%%) have zero detected events",
-                          n_zero, n_total, pct_zero),
-       x = "Longitude", y = "Latitude") +
-  coord_sf(expand = FALSE) +
-  theme_minimal(base_size = 11)
+  p_zero <- ggplot() +
+    geom_sf(data = world, fill = "grey90", colour = "white", linewidth = 0.2) +
+    geom_point(data = all_pixels[!all_pixels$has_event, ],
+               aes(x = x, y = y), colour = "firebrick", size = 0.3, alpha = 0.5) +
+    geom_point(data = all_pixels[all_pixels$has_event, ],
+               aes(x = x, y = y), colour = "steelblue", size = 0.3, alpha = 0.2) +
+    labs(title = "Check 4: Zero-event pixels (red) vs pixels with events (blue)",
+         subtitle = sprintf("%d of %d pixels (%.1f%%) have zero detected events",
+                            n_zero, n_total, pct_zero),
+         x = "Longitude", y = "Latitude") +
+    coord_sf(expand = FALSE) +
+    theme_minimal(base_size = 11)
 
-ggsave(file.path(FIGURES_PATH, "sanity_check4_zero_pixels_map.png"),
-       p_zero, width = 12, height = 6, dpi = 150)
-message("  Saved -> sanity_check4_zero_pixels_map.png")
+  ggsave(file.path(FIGURES_PATH, "sanity_check4_zero_pixels_map.png"),
+         p_zero, width = 12, height = 6, dpi = 150)
+  message("  Saved -> sanity_check4_zero_pixels_map.png")
+}, error = function(e) .log_check_error("Check 4", e))
 
 
 # =============================================================================
@@ -284,6 +290,8 @@ message("  Saved -> sanity_check4_zero_pixels_map.png")
 # Using threshold method only (cumulative end condition is different).
 # =============================================================================
 message("\n=== Check 5: Symmetric threshold test ===")
+
+tryCatch({
 
 # detect_droughts() copied from script 03 — sourcing script 03 directly would
 # re-run the entire 75-config detection loop and overwrite outputs.
@@ -384,8 +392,11 @@ if (nrow(sym_events) == 0) {
 
   saveRDS(sym_events, file.path(VOLUME_PATH, "sanity_check5_symmetric_test.rds"))
   message("  Saved -> sanity_check5_symmetric_test.rds")
-}
+  }
+
+}, error = function(e) .log_check_error("Check 5", e))
 
 
 message("\n=== All 5 sanity checks complete ===")
-message("Review outputs in ./Figures/ and ./Data/ before proceeding to Analysis 1.")
+message("Review outputs in Figures/ before proceeding to Analysis 1.")
+message(sprintf("Error log (if any): %s/script04_error.txt", VOLUME_PATH))
