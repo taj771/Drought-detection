@@ -38,13 +38,33 @@ P_THRESHOLD  <- 0.05
 
 
 # -- Load data ----------------------------------------------------------------
+# drought_summary_yearly_ref.rds covers full detection period (1970–2023).
+# Split here into reference and comparison periods by year filter.
+# Column rename matches script 06 convention.
 message("Loading annual summaries...")
-annual_ref  <- readRDS(file.path(VOLUME_PATH, "drought_annual_summary_ref.rds"))
-annual_comp <- readRDS(file.path(VOLUME_PATH, "drought_annual_summary_comp.rds"))
+yearly_full <- readRDS(file.path(VOLUME_PATH, "drought_summary_yearly_ref.rds")) %>%
+  rename(
+    annual_freq_events   = mean_events_per_pixel,
+    annual_mean_duration = mean_duration_months,
+    annual_mean_peak     = mean_peak_index,
+    annual_pct_pixels    = pct_pixels_affected
+  )
+
+# Compute cv_freq per config × country (needed by char_cols map)
+cv_lookup <- yearly_full %>%
+  group_by(config_id, country) %>%
+  summarise(
+    cv_freq = round(sd(annual_freq_events, na.rm = TRUE) /
+                    max(mean(annual_freq_events, na.rm = TRUE), 1e-9), 3),
+    .groups = "drop"
+  )
+yearly_full <- yearly_full %>% left_join(cv_lookup, by = c("config_id", "country"))
+
 avg_ranks_ref <- readRDS(file.path(VOLUME_PATH, "analysis1_avg_ranks.rds"))
 
-annual_ref  <- annual_ref  %>% filter(event_year >= REF_START,  event_year <= REF_END)
-annual_comp <- annual_comp %>% filter(event_year >= COMP_START, event_year <= COMP_END)
+annual_ref  <- yearly_full %>% filter(event_year >= REF_START,  event_year <= REF_END)
+annual_comp <- yearly_full %>% filter(event_year >= COMP_START, event_year <= COMP_END)
+rm(yearly_full)
 
 countries <- intersect(unique(annual_ref$country), unique(annual_comp$country))
 
@@ -90,8 +110,8 @@ pct_change_all <- map_dfr(names(char_cols), function(char_name) {
 
   col <- char_cols[char_name]
 
-  ref_vals  <- ref_means  %>% select(config_id, country, value = all_of(col))
-  comp_vals <- comp_means %>% select(config_id, country, value = all_of(col))
+  ref_vals  <- ref_means  %>% select(config_id, country, value = all_of(unname(col)))
+  comp_vals <- comp_means %>% select(config_id, country, value = all_of(unname(col)))
 
   inner_join(ref_vals, comp_vals, by = c("config_id", "country"),
              suffix = c("_ref", "_comp")) %>%
@@ -199,7 +219,7 @@ for (ctry in countries) {
     col <- char_cols[char_name]
 
     wide <- ctry_comp %>%
-      select(config_id, event_year, value = all_of(col)) %>%
+      select(config_id, event_year, value = all_of(unname(col))) %>%
       pivot_wider(names_from = config_id, values_from = value,
                   values_fn = mean) %>%
       arrange(event_year) %>%
