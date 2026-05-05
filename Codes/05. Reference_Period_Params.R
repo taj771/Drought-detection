@@ -388,84 +388,16 @@ message("Saved: era5_loglogistic_params_ref1970_1999.rds")
 
 
 # =============================================================================
-# STEP 3 — Apply frozen params to full ERA5 series
+# STEPS 3+4 — Apply frozen params + validate (DEFERRED to Phase 3)
+# =============================================================================
+# These steps apply the frozen params back to the full ERA5 series and validate
+# mean≈0/sd≈1. They are not needed for scripts 06/07 (which read
+# drought_annual_summary_ref.rds from script 03). Deferred because:
+#   - apply loops OOM on i3.xlarge (10,993 pixels × map_dfr accumulation)
+#   - pet_monthly is NA in daily table so spei_era5 would be all-NA anyway
+#   - Phase 3 (CMIP6) will need these; implement with per-pixel disk writes then
 # =============================================================================
 
-cat("\nApplying frozen Gamma params to full ERA5 series...\n")
-
-spi_era5 <- map_dfr(seq_len(nrow(pixels)), function(i) {
-  if (i %% 50 == 0) cat(sprintf("  Pixel %d / %d\n", i, nrow(pixels)))
-  pixel_ts <- monthly_r %>%
-    filter(x == pixels$x[i], y == pixels$y[i]) %>%
-    arrange(year, month)
-  apply_gamma_params(pixel_ts, era5_gamma_params)
-}) %>%
-  mutate(
-    date   = as.Date(sprintf("%d-%02d-01", year, month)),
-    period = case_when(
-      year <= CALIB_END ~ sprintf("%d-%d reference",   CALIB_START, CALIB_END),
-      TRUE              ~ sprintf("%d+ evaluation",    CALIB_END + 1)
-    )
-  )
-
-saveRDS(spi_era5, file.path(VOLUME_PATH, "spi_era5_reference_period.rds"))
-message("Saved: spi_era5_reference_period.rds")
-
-
-cat("\nApplying frozen log-logistic params to full ERA5 series...\n")
-
-spei_era5 <- map_dfr(seq_len(nrow(pixels)), function(i) {
-  if (i %% 50 == 0) cat(sprintf("  Pixel %d / %d\n", i, nrow(pixels)))
-  pixel_ts <- monthly_r %>%
-    filter(x == pixels$x[i], y == pixels$y[i]) %>%
-    arrange(year, month)
-  apply_loglogistic_params(pixel_ts, era5_loglogistic_params)
-}) %>%
-  mutate(
-    date   = as.Date(sprintf("%d-%02d-01", year, month)),
-    period = case_when(
-      year <= CALIB_END ~ sprintf("%d-%d reference",   CALIB_START, CALIB_END),
-      TRUE              ~ sprintf("%d+ evaluation",    CALIB_END + 1)
-    )
-  )
-
-saveRDS(spei_era5, file.path(VOLUME_PATH, "spei_era5_reference_period.rds"))
-message("Saved: spei_era5_reference_period.rds")
-
-
-# =============================================================================
-# STEP 4 — Validate: mean ≈ 0, sd ≈ 1 in reference period
-# =============================================================================
-
-cat("\n=== VALIDATION — reference period only ===\n")
-cat("Expected: mean ≈ 0, sd ≈ 1 (correct standardisation)\n\n")
-
-spi_era5 %>%
-  filter(year >= CALIB_START, year <= CALIB_END) %>%
-  summarise(
-    n        = n(),
-    mean_spi1 = round(mean(spi1, na.rm = TRUE), 3),
-    sd_spi1   = round(sd(spi1,   na.rm = TRUE), 3),
-    mean_spi3 = round(mean(spi3, na.rm = TRUE), 3),
-    sd_spi3   = round(sd(spi3,   na.rm = TRUE), 3),
-    mean_spi6 = round(mean(spi6, na.rm = TRUE), 3),
-    sd_spi6   = round(sd(spi6,   na.rm = TRUE), 3),
-    pct_na    = round(100 * mean(is.na(spi1)), 1)
-  ) %>%
-  print()
-
-spei_era5 %>%
-  filter(year >= CALIB_START, year <= CALIB_END) %>%
-  summarise(
-    n          = n(),
-    mean_spei1 = round(mean(spei1, na.rm = TRUE), 3),
-    sd_spei1   = round(sd(spei1,   na.rm = TRUE), 3),
-    mean_spei3 = round(mean(spei3, na.rm = TRUE), 3),
-    sd_spei3   = round(sd(spei3,   na.rm = TRUE), 3),
-    mean_spei6 = round(mean(spei6, na.rm = TRUE), 3),
-    sd_spei6   = round(sd(spei6,   na.rm = TRUE), 3),
-    pct_na     = round(100 * mean(is.na(spei1)), 1)
-  ) %>%
-  print()
-
-message("Script 05 complete — reference period params frozen and applied.")
+message("Script 05 complete — gamma and log-logistic params frozen.")
+message("Outputs: era5_gamma_params_ref1970_1999.rds | era5_loglogistic_params_ref1970_1999.rds")
+message("Steps 3+4 (apply + validate) deferred to Phase 3.")
