@@ -388,16 +388,142 @@ message("Saved: era5_loglogistic_params_ref1970_1999.rds")
 
 
 # =============================================================================
-# STEPS 3+4 — Apply frozen params + validate (DEFERRED to Phase 3)
+# STEP 3 — Apply frozen Gamma params to full ERA5 series
 # =============================================================================
-# These steps apply the frozen params back to the full ERA5 series and validate
-# mean≈0/sd≈1. They are not needed for scripts 06/07 (which read
-# drought_annual_summary_ref.rds from script 03). Deferred because:
-#   - apply loops OOM on i3.xlarge (10,993 pixels × map_dfr accumulation)
-#   - pet_monthly is NA in daily table so spei_era5 would be all-NA anyway
-#   - Phase 3 (CMIP6) will need these; implement with per-pixel disk writes then
+# Per-pixel disk-write pattern (same as script 03) — avoids OOM from
+# map_dfr accumulating 10,993 pixel results simultaneously in RAM.
+# Each pixel written to spi_tmp/px_<hash>.rds, combined after loop.
 # =============================================================================
 
-message("Script 05 complete — gamma and log-logistic params frozen.")
+SPI_TMP <- file.path(VOLUME_PATH, "spi_era5_tmp")
+dir.create(SPI_TMP, showWarnings = FALSE, recursive = TRUE)
+
+cat(sprintf("\nApplying frozen Gamma params to full ERA5 series (%d pixels)...\n",
+            nrow(pixels)))
+
+for (i in seq_len(nrow(pixels))) {
+  px_key  <- sprintf("px_%s_%s", gsub("\\.", "p", pixels$x[i]),
+                                  gsub("\\.", "p", pixels$y[i]))
+  out_f   <- file.path(SPI_TMP, paste0(px_key, ".rds"))
+  if (file.exists(out_f)) next   # skip-if-exists for resume safety
+
+  pixel_ts <- monthly_r[monthly_r$x == pixels$x[i] &
+                           monthly_r$y == pixels$y[i], ]
+  pixel_ts <- pixel_ts[order(pixel_ts$year, pixel_ts$month), ]
+
+  result <- tryCatch(
+    apply_gamma_params(pixel_ts, era5_gamma_params),
+    error = function(e) {
+      cat(sprintf("  Gamma apply error px %d: %s\n", i, e$message))
+      NULL
+    }
+  )
+
+  if (!is.null(result) && nrow(result) > 0) {
+    saveRDS(result, out_f)
+  }
+
+  if (i %% 500 == 0) {
+    done <- length(list.files(SPI_TMP, pattern = "\\.rds$"))
+    cat(sprintf("  SPI apply: %d / %d pixels written\n", done, nrow(pixels)))
+    gc(verbose = FALSE)
+  }
+}
+
+cat("  Combining SPI pixel files...\n")
+spi_files <- list.files(SPI_TMP, pattern = "\\.rds$", full.names = TRUE)
+spi_era5  <- do.call(rbind, lapply(spi_files, readRDS))
+spi_era5$date <- as.Date(sprintf("%d-%02d-01", spi_era5$year, spi_era5$month))
+spi_era5$period <- ifelse(spi_era5$year <= CALIB_END,
+                           sprintf("%d-%d reference", CALIB_START, CALIB_END),
+                           sprintf("%d+ evaluation",  CALIB_END + 1))
+
+saveRDS(spi_era5, file.path(VOLUME_PATH, "spi_era5_reference_period.rds"))
+message("Saved: spi_era5_reference_period.rds")
+
+# Clean up tmp files
+unlink(SPI_TMP, recursive = TRUE)
+
+
+# =============================================================================
+# STEP 4 — Apply frozen log-logistic params to full ERA5 series
+# =============================================================================
+# Note: pet_monthly is NA in ERA5 daily table — SPEI water balance (P - PET)
+# will be NA for all pixels. apply_loglogistic_params() handles this gracefully
+# (returns data.frame with spei1/3/6 = NA). Step runs for completeness and to
+# produce the output file structure needed in Phase 3 when PET data is available.
+# =============================================================================
+
+SPEI_TMP <- file.path(VOLUME_PATH, "spei_era5_tmp")
+dir.create(SPEI_TMP, showWarnings = FALSE, recursive = TRUE)
+
+cat(sprintf("\nApplying frozen log-logistic params to full ERA5 series (%d pixels)...\n",
+            nrow(pixels)))
+
+for (i in seq_len(nrow(pixels))) {
+  px_key  <- sprintf("px_%s_%s", gsub("\\.", "p", pixels$x[i]),
+                                  gsub("\\.", "p", pixels$y[i]))
+  out_f   <- file.path(SPEI_TMP, paste0(px_key, ".rds"))
+  if (file.exists(out_f)) next
+
+  pixel_ts <- monthly_r[monthly_r$x == pixels$x[i] &
+                            monthly_r$y == pixels$y[i], ]
+  pixel_ts <- pixel_ts[order(pixel_ts$year, pixel_ts$month), ]
+
+  result <- tryCatch(
+    apply_loglogistic_params(pixel_ts, era5_loglogistic_params),
+    error = function(e) {
+      cat(sprintf("  LogLogistic apply error px %d: %s\n", i, e$message))
+      NULL
+    }
+  )
+
+  if (!is.null(result) && nrow(result) > 0) {
+    saveRDS(result, out_f)
+  }
+
+  if (i %% 500 == 0) {
+    done <- length(list.files(SPEI_TMP, pattern = "\\.rds$"))
+    cat(sprintf("  SPEI apply: %d / %d pixels written\n", done, nrow(pixels)))
+    gc(verbose = FALSE)
+  }
+}
+
+cat("  Combining SPEI pixel files...\n")
+spei_files <- list.files(SPEI_TMP, pattern = "\\.rds$", full.names = TRUE)
+spei_era5  <- do.call(rbind, lapply(spei_files, readRDS))
+spei_era5$date <- as.Date(sprintf("%d-%02d-01", spei_era5$year, spei_era5$month))
+spei_era5$period <- ifelse(spei_era5$year <= CALIB_END,
+                            sprintf("%d-%d reference", CALIB_START, CALIB_END),
+                            sprintf("%d+ evaluation",  CALIB_END + 1))
+
+saveRDS(spei_era5, file.path(VOLUME_PATH, "spei_era5_reference_period.rds"))
+message("Saved: spei_era5_reference_period.rds")
+
+unlink(SPEI_TMP, recursive = TRUE)
+
+
+# =============================================================================
+# STEP 5 — Validate: mean ≈ 0, sd ≈ 1 in reference period
+# =============================================================================
+
+cat("\n=== VALIDATION — reference period only ===\n")
+cat("Expected: mean ≈ 0, sd ≈ 1 (correct standardisation)\n\n")
+
+spi_era5 %>%
+  filter(year >= CALIB_START, year <= CALIB_END) %>%
+  summarise(
+    n          = n(),
+    mean_spi1  = round(mean(spi1, na.rm = TRUE), 3),
+    sd_spi1    = round(sd(spi1,   na.rm = TRUE), 3),
+    mean_spi3  = round(mean(spi3, na.rm = TRUE), 3),
+    sd_spi3    = round(sd(spi3,   na.rm = TRUE), 3),
+    mean_spi6  = round(mean(spi6, na.rm = TRUE), 3),
+    sd_spi6    = round(sd(spi6,   na.rm = TRUE), 3),
+    pct_na     = round(100 * mean(is.na(spi1)), 1)
+  ) %>%
+  print()
+
+message("Script 05 complete — reference period params frozen and applied.")
 message("Outputs: era5_gamma_params_ref1970_1999.rds | era5_loglogistic_params_ref1970_1999.rds")
-message("Steps 3+4 (apply + validate) deferred to Phase 3.")
+message("         spi_era5_reference_period.rds | spei_era5_reference_period.rds")
