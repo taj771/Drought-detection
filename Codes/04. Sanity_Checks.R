@@ -38,6 +38,9 @@
 
 
 # -- Libraries ----------------------------------------------------------------
+if (!requireNamespace("patchwork", quietly = TRUE)) install.packages("patchwork")
+if (!requireNamespace("rnaturalearth", quietly = TRUE)) install.packages("rnaturalearth")
+if (!requireNamespace("rnaturalearthdata", quietly = TRUE)) install.packages("rnaturalearthdata")
 library(dplyr)
 library(ggplot2)
 library(purrr)
