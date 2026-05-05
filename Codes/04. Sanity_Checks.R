@@ -38,13 +38,11 @@
 
 
 # -- Libraries ----------------------------------------------------------------
-if (!requireNamespace("patchwork", quietly = TRUE)) install.packages("patchwork")
 if (!requireNamespace("rnaturalearth", quietly = TRUE)) install.packages("rnaturalearth")
 if (!requireNamespace("rnaturalearthdata", quietly = TRUE)) install.packages("rnaturalearthdata")
 library(dplyr)
 library(ggplot2)
 library(purrr)
-library(patchwork)
 library(lubridate)
 library(terra)
 library(sf)
@@ -132,10 +130,14 @@ plots <- purrr::map(seq_len(nrow(sample_events)), function(i) {
 plots <- Filter(Negate(is.null), plots)
 
 if (length(plots) > 0) {
-  p_combined <- patchwork::wrap_plots(plots, ncol = 2)
-  ggplot2::ggsave(file.path(FIGURES_PATH, "sanity_check1_events_sample.png"),
-                  p_combined, width = 14, height = 10, dpi = 150)
-  message(sprintf("  Saved %d event plots -> %s/sanity_check1_events_sample.png",
+  for (pi in seq_along(plots)) {
+    ggplot2::ggsave(
+      file.path(FIGURES_PATH,
+                sprintf("sanity_check1_event_%02d.png", pi)),
+      plots[[pi]], width = 7, height = 4, dpi = 150
+    )
+  }
+  message(sprintf("  Saved %d event plots -> %s/sanity_check1_event_XX.png",
                   length(plots), FIGURES_PATH))
 } else {
   message("  No plots generated — check index column names match spi_data.")
