@@ -56,32 +56,47 @@ FIGURES_PATH <- file.path(VOLUME_PATH, "Figures")
 
 # Helper: log error to Volume and print — does NOT stop execution
 .log_check_error <- function(check_name, e) {
-  msg <- paste0(check_name, " ERROR at ", Sys.time(), "\n", conditionMessage(e))
-  log_path <- file.path(VOLUME_PATH, "script04_error.txt")
-  cat(msg, file = log_path, append = TRUE)
+  msg <- paste0("[", Sys.time(), "] ", check_name, " FAILED: ", conditionMessage(e), "\n")
+  tryCatch(
+    cat(msg, file = file.path(VOLUME_PATH, "script04_error.txt"), append = TRUE),
+    error = function(e2) NULL
+  )
   message(sprintf("  ERROR in %s: %s", check_name, conditionMessage(e)))
 }
 
 
 # -- Load data ----------------------------------------------------------------
-message("Loading detection outputs...")
 
+# Write a startup marker immediately — if script04_error.txt exists later
+# but NOT this marker, the crash happened during library loading.
+LOG_PATH <- file.path(VOLUME_PATH, "script04_error.txt")
+writeLines(paste0("[", Sys.time(), "] Script 04 started — data load beginning\n"),
+           LOG_PATH)
+
+message("Loading all_drought_events.rds (~1500 MB on disk)...")
 events_full <- readRDS(file.path(VOLUME_PATH, "all_drought_events.rds"))
+message(sprintf("  Loaded: %d rows x %d cols", nrow(events_full), ncol(events_full)))
 
 # Keep only columns needed across all 5 checks — drops ~60% of RAM
 KEEP_COLS <- c("x", "y", "country", "config_id", "index", "method",
                "start_thr", "start_date", "end_date", "duration_months",
                "peak_index", "severity_class", "event_year")
 keep_present <- KEEP_COLS[KEEP_COLS %in% names(events_full)]
-events <- events_full[, keep_present]
+events <- events_full[, keep_present, drop = FALSE]
 rm(events_full); gc()
+message(sprintf("  Pruned to %d cols, gc() done", ncol(events)))
 
+message("Loading spi_results.rds (~268 MB on disk)...")
 spi_data <- readRDS(file.path(VOLUME_PATH, "spi_results.rds"))
+message(sprintf("  Loaded: %d rows x %d cols", nrow(spi_data), ncol(spi_data)))
 
 dir.create(FIGURES_PATH, showWarnings = FALSE, recursive = TRUE)
 
 events$start_date <- as.Date(events$start_date)
 events$end_date   <- as.Date(events$end_date)
+
+cat(paste0("[", Sys.time(), "] Data load complete — entering checks\n"),
+    file = LOG_PATH, append = TRUE)
 
 
 # =============================================================================
