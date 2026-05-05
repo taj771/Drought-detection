@@ -28,8 +28,8 @@ RUN_DETECTION  <- FALSE  # Script 03: Drought detection — DONE 2026-05-05
 RUN_SANITY     <- FALSE  # Script 04: Sanity checks — DONE 2026-05-05
 RUN_REF_PARAMS <- FALSE  # Script 05: Freeze reference period params — DONE 2026-05-05
 RUN_FRIEDMAN   <- FALSE  # Script 06: Analysis 1 — Friedman + Nemenyi — DONE 2026-05-05
-RUN_CROSSPERIOD <- TRUE  # Script 07: Analysis 2 — cross-period comparison
-RUN_APPENDIX   <- FALSE  # Script 08: Appendix A1 figure
+RUN_CROSSPERIOD <- FALSE # Script 07: Analysis 2 — cross-period comparison — DONE 2026-05-05
+RUN_APPENDIX   <- TRUE   # Script 08: Appendix A1 figure
 ```
 
 ```{r step1-spi}

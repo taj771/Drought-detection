@@ -23,24 +23,31 @@ library(lubridate)
 
 # -- Configuration ------------------------------------------------------------
 VOLUME_PATH  <- "/Volumes/projects/gwsc_drought/drought_outputs"
-FIGURES_PATH <- "Figures"
+FIGURES_PATH <- file.path(VOLUME_PATH, "Figures")
 
 TARGET_X     <- 100.375
 TARGET_Y     <-  14.625
 TARGET_INDEX <- "spi6"
 TARGET_METHOD <- "threshold"
 TARGET_THR   <- 0.0
-TARGET_CONFID <- "S6-T-00"   # config_id for spi6, threshold, thr=0.0
+TARGET_CONFID <- "S6-T-000"  # config_id for spi6, threshold, thr=0.0
 
 dir.create(FIGURES_PATH, showWarnings = FALSE, recursive = TRUE)
 
 
 # -- Load data ----------------------------------------------------------------
+# Use spi_results.rds (script 01 output) — has spi6, smaller than spi_era5 file.
 message("Loading SPI data...")
-spi_data <- readRDS(file.path(VOLUME_PATH, "spi_era5_reference_period.rds"))
+spi_data <- readRDS(file.path(VOLUME_PATH, "spi_results.rds"))
 
-message("Loading drought events...")
-events   <- readRDS(file.path(VOLUME_PATH, "all_drought_events.rds"))
+# Load only the target config chunk — avoids OOM from all_drought_events.rds (1500 MB).
+message("Loading drought events for target config...")
+cfg_file <- file.path(VOLUME_PATH, "detection_tmp",
+                      paste0("cfg_", TARGET_CONFID, ".rds"))
+if (!file.exists(cfg_file)) {
+  stop(sprintf("Config file not found: %s", cfg_file))
+}
+events <- readRDS(cfg_file)
 
 
 # -- Extract pixel time series ------------------------------------------------
