@@ -86,7 +86,19 @@ if (RUN_SANITY) {
   message("================================================================")
   message("STEP 4: Sanity Checks")
   message("================================================================")
-  source(file.path(CODES_PATH, "04. Sanity_Checks.R"))
+  tryCatch(
+    source(file.path(CODES_PATH, "04. Sanity_Checks.R")),
+    error = function(e) {
+      err_msg <- paste0(
+        "SCRIPT 04 ERROR at ", Sys.time(), "\n",
+        conditionMessage(e), "\n",
+        paste(capture.output(traceback()), collapse = "\n")
+      )
+      writeLines(err_msg, "/Volumes/projects/gwsc_drought/drought_outputs/script04_error.txt")
+      message("ERROR WRITTEN TO VOLUME: script04_error.txt")
+      stop(e)
+    }
+  )
 }
 ```
 
