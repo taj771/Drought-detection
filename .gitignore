@@ -28,6 +28,18 @@ Data/
 .databricks
 .vscode
 
+# Junk/temp files
+.RDataTmp
+*.docx
+COMP_START
+0)
+0.05)
+0.8)
+100)
+120)
+24
+50)
+
 typings/
 
 # Old/exploratory scripts — not for GWSC repo
