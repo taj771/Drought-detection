@@ -108,8 +108,11 @@ safe_spei <- function(precip_vec, temp_vec, lat, scale = 3) {
       return(rep(NA_real_, length(precip_vec)))
     }
 
-    # Step 2a: Thornthwaite PET (°C required — see unit note above)
-    pet <- as.numeric(thornthwaite(temp_vec, lat = lat))
+    # Step 2a: Thornthwaite PET (°C required).
+    # ERA5 mean_temp is stored in Kelvin in the Databricks catalog.
+    # Detect by checking median: Kelvin values cluster ~273-310, Celsius ~0-37.
+    temp_c <- if (median(temp_vec, na.rm = TRUE) > 100) temp_vec - 273.15 else temp_vec
+    pet <- as.numeric(thornthwaite(temp_c, lat = lat))
 
     # Step 2b: Water balance
     water_balance <- precip_vec - pet
@@ -139,7 +142,7 @@ safe_spei <- function(precip_vec, temp_vec, lat, scale = 3) {
 # Data MUST be chronologically sorted before grouping.
 spei_results <- monthly_r %>%
   arrange(x, y, year, month) %>%
-  group_by(x, y) %>%
+  group_by(x, y, country) %>%
   mutate(
     spei1  = safe_spei(monthly_precip, mean_temp_monthly, lat = first(y), scale = 1),
     spei3  = safe_spei(monthly_precip, mean_temp_monthly, lat = first(y), scale = 3),
