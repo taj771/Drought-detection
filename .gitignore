@@ -27,3 +27,16 @@ Data/
 
 .databricks
 .vscode
+
+typings/
+
+# Old/exploratory scripts — not for GWSC repo
+Codes/old/
+
+# QMD workflow documents — internal only
+Drought\ Matrices\ -\ Data\ Science\ Workflow.qmd
+Drought\ Matrices\ -\ Data\ Science\ Workflow\ -\ Phase\ 2.qmd
+Drought\ Calculation\ daily\ clarification.qmd
+*.html
+*.tex
+*_files/

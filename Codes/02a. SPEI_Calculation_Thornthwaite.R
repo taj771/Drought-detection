@@ -140,10 +140,19 @@ safe_spei <- function(precip_vec, temp_vec, lat, scale = 3) {
 #
 # lat = first(y): each pixel group uses its own latitude for Thornthwaite PET.
 # Data MUST be chronologically sorted before grouping.
+# thornthwaite_wb() returns P - PET for a pixel group.
+# Used to store water_balance in output for Script 05 log-logistic param fitting.
+thornthwaite_wb <- function(precip_vec, temp_vec, lat) {
+  temp_c <- if (median(temp_vec, na.rm = TRUE) > 100) temp_vec - 273.15 else temp_vec
+  pet    <- as.numeric(thornthwaite(temp_c, lat = lat))
+  precip_vec - pet
+}
+
 spei_results <- monthly_r %>%
   arrange(x, y, year, month) %>%
   group_by(x, y, country) %>%
   mutate(
+    water_balance = thornthwaite_wb(monthly_precip, mean_temp_monthly, lat = first(y)),
     spei1  = safe_spei(monthly_precip, mean_temp_monthly, lat = first(y), scale = 1),
     spei3  = safe_spei(monthly_precip, mean_temp_monthly, lat = first(y), scale = 3),
     spei6  = safe_spei(monthly_precip, mean_temp_monthly, lat = first(y), scale = 6),
@@ -178,5 +187,6 @@ message("SPEI (Thornthwaite) calculation complete!")
 
 # -- Save output --------------------------------------------------------------
 # spei_thornthwaite_results.rds feeds into Script 03 alongside spi_results.rds and spei_penman_results.rds.
+# water_balance column (P - Thornthwaite PET) retained for Script 05 log-logistic param fitting.
 VOLUME_PATH <- "/Volumes/projects/gwsc_drought/drought_outputs"
 saveRDS(spei_results, file.path(VOLUME_PATH, "spei_thornthwaite_results.rds"))

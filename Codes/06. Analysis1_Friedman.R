@@ -407,3 +407,247 @@ friedman_results %>%
   select(country, characteristic, friedman_Q, p_value, kendall_W, significant) %>%
   arrange(country, characteristic) %>%
   print(row.names = FALSE)
+
+
+# =============================================================================
+# STRATIFIED FRIEDMAN — k=15 per WMO-standard threshold (D11 fix)
+# =============================================================================
+# Flat k=75 Nemenyi CD ≈ 24.9 — too conservative to detect meaningful pairs.
+# Stratified: one Friedman per threshold (-0.5, -1.0, -1.5) × country × char.
+# k=15 (5 indices × 3 accumulation periods per threshold). CD ≈ 4.8.
+# Thresholds 0.0 and -0.25 excluded — not WMO standard operational thresholds.
+# Separate Spearman rank correlation tests whether config rank order is stable
+# across the three thresholds (threshold robustness check).
+# Outputs:
+#   analysis1_friedman_stratified.rds  — Friedman results per threshold stratum
+#   analysis1_threshold_robustness.rds — Spearman r of avg rank across thresholds
+# =============================================================================
+
+message("\n=== Stratified Friedman (k=15 per WMO threshold) ===")
+
+WMO_THRESHOLDS <- c(-0.5, -1.0, -1.5)
+
+# Parse threshold from config_id suffix: S3-T-050 → -0.50, ET6-T-100 → -1.00
+# Suffix format: last hyphen-separated token, numeric × (-1/100)
+parse_threshold <- function(config_ids) {
+  suffix <- sub(".*-", "", config_ids)
+  as.numeric(suffix) / -100
+}
+
+annual_ref_thr <- annual_ref %>%
+  mutate(threshold = parse_threshold(config_id)) %>%
+  filter(threshold %in% WMO_THRESHOLDS)
+
+cat(sprintf("Configs after WMO threshold filter: %d\n",
+            n_distinct(annual_ref_thr$config_id)))
+
+strat_friedman_all  <- list()
+strat_avg_ranks_all <- list()
+
+for (ctry in countries) {
+  for (thr in WMO_THRESHOLDS) {
+
+    ctry_thr <- annual_ref_thr %>%
+      filter(country == ctry, threshold == thr)
+
+    n_cfg_thr <- n_distinct(ctry_thr$config_id)
+    if (n_cfg_thr < 2) next
+
+    for (char_name in names(characteristics$raw)) {
+
+      col <- characteristics$raw[char_name]
+
+      wide <- ctry_thr %>%
+        select(config_id, event_year, value = all_of(unname(col))) %>%
+        tidyr::pivot_wider(names_from = config_id, values_from = value,
+                           values_fn = mean) %>%
+        arrange(event_year) %>%
+        select(-event_year)
+
+      result <- tryCatch(
+        run_friedman_nemenyi(wide, char_name, calibrated = FALSE),
+        error = function(e) NULL
+      )
+      if (is.null(result)) next
+
+      result$friedman$country   <- ctry
+      result$friedman$threshold <- thr
+      result$avg_ranks$country  <- ctry
+      result$avg_ranks$threshold <- thr
+
+      strat_friedman_all[[length(strat_friedman_all) + 1]]   <- result$friedman
+      strat_avg_ranks_all[[length(strat_avg_ranks_all) + 1]] <- result$avg_ranks
+    }
+  }
+}
+
+strat_friedman  <- if (length(strat_friedman_all)  > 0) do.call(rbind, strat_friedman_all)  else data.frame()
+strat_avg_ranks <- if (length(strat_avg_ranks_all) > 0) do.call(rbind, strat_avg_ranks_all) else data.frame()
+
+saveRDS(strat_friedman,  file.path(VOLUME_PATH, "analysis1_friedman_stratified.rds"))
+message("Saved: analysis1_friedman_stratified.rds")
+
+# Quick stratified summary
+if (nrow(strat_friedman) > 0) {
+  cat("\n=== Stratified Friedman summary ===\n")
+  strat_friedman %>%
+    select(country, characteristic, threshold, friedman_Q, p_value, kendall_W, significant) %>%
+    arrange(country, characteristic, threshold) %>%
+    print(row.names = FALSE)
+}
+
+
+# -- Threshold robustness: Spearman r of avg rank order across thresholds -----
+# Per country × characteristic: do configs rank the same at -0.5 vs -1.0 vs -1.5?
+# High r = threshold choice doesn't change relative config ranking.
+
+if (nrow(strat_avg_ranks) > 0) {
+
+  thr_pairs <- combn(WMO_THRESHOLDS, 2, simplify = FALSE)
+
+  threshold_robustness <- map_dfr(countries, function(ctry) {
+    map_dfr(names(characteristics$raw), function(char_name) {
+      map_dfr(thr_pairs, function(tp) {
+        r1 <- strat_avg_ranks %>%
+          filter(country == ctry, characteristic == char_name, threshold == tp[1]) %>%
+          select(config_id, r1 = avg_rank)
+        r2 <- strat_avg_ranks %>%
+          filter(country == ctry, characteristic == char_name, threshold == tp[2]) %>%
+          select(config_id, r2 = avg_rank)
+        joined <- inner_join(r1, r2, by = "config_id")
+        if (nrow(joined) < 3) return(data.frame())
+        data.frame(
+          country        = ctry,
+          characteristic = char_name,
+          thr_a          = tp[1],
+          thr_b          = tp[2],
+          spearman_r     = round(cor(joined$r1, joined$r2,
+                                     method = "spearman", use = "complete.obs"), 3),
+          n_configs      = nrow(joined),
+          stringsAsFactors = FALSE
+        )
+      })
+    })
+  })
+
+  saveRDS(threshold_robustness, file.path(VOLUME_PATH, "analysis1_threshold_robustness.rds"))
+  message("Saved: analysis1_threshold_robustness.rds")
+
+  cat("\n=== Threshold robustness (Spearman r of rank order across WMO thresholds) ===\n")
+  threshold_robustness %>%
+    group_by(country, characteristic) %>%
+    summarise(mean_r = round(mean(spearman_r, na.rm = TRUE), 3), .groups = "drop") %>%
+    arrange(country, characteristic) %>%
+    print(row.names = FALSE)
+}
+
+
+# =============================================================================
+# LEVEL 3 — Spatial agreement tests (Analysis Plan Section 2.3.1)
+# =============================================================================
+# Two tests:
+#   A. Spatial rank correlation — Spearman r of pixel drought freq ranks
+#      across configs per country. High r = definitions agree on where worst.
+#   B. Hotspot agreement map — % of configs classifying each pixel as hotspot
+#      (freq >= 75th percentile within country). Pixels where most configs agree
+#      = robust hotspots for GWSC targeting.
+#
+# Input: pixel_freq_ref.rds (per pixel × config, ref period total events)
+# Outputs:
+#   analysis1_spatial_rank_corr.rds  — Spearman r per country × config pair
+#   analysis1_hotspot_agreement.rds  — per pixel × country: pct configs hotspot
+# =============================================================================
+
+message("\n=== Level 3: Spatial agreement tests ===")
+
+pf_path <- file.path(VOLUME_PATH, "pixel_freq_ref.rds")
+
+if (!file.exists(pf_path)) {
+  message("  pixel_freq_ref.rds not found — skipping Level 3 (rerun Script 03 first)")
+} else {
+
+  pixel_freq <- readRDS(pf_path)
+  message(sprintf("  pixel_freq_ref: %s rows, %d configs, %d pixels",
+                  format(nrow(pixel_freq), big.mark = ","),
+                  n_distinct(pixel_freq$config_id),
+                  n_distinct(paste(pixel_freq$x, pixel_freq$y))))
+
+  # ---- A. Spatial rank correlation -------------------------------------------
+  # Per country: pivot wide (rows = pixels, cols = configs), compute all-pairs
+  # Spearman r, summarise as mean r across pairs.
+
+  spatial_rank_corr <- map_dfr(countries, function(ctry) {
+
+    pf_c <- pixel_freq %>% filter(country == ctry)
+    if (n_distinct(pf_c$config_id) < 2 || n_distinct(paste(pf_c$x, pf_c$y)) < 5)
+      return(data.frame())
+
+    wide <- pf_c %>%
+      select(x, y, config_id, ref_n_events) %>%
+      tidyr::pivot_wider(names_from = config_id, values_from = ref_n_events,
+                         values_fn = sum) %>%
+      select(-x, -y)
+
+    mat        <- as.matrix(wide)
+    cfg_names  <- colnames(mat)
+    pairs      <- combn(cfg_names, 2, simplify = FALSE)
+
+    pair_r <- map_dfr(pairs, function(p) {
+      r <- cor(mat[, p[1]], mat[, p[2]],
+               method = "spearman", use = "complete.obs")
+      data.frame(country   = ctry,
+                 config_a  = p[1],
+                 config_b  = p[2],
+                 spearman_r = round(r, 4),
+                 stringsAsFactors = FALSE)
+    })
+
+    pair_r
+  })
+
+  if (nrow(spatial_rank_corr) > 0) {
+    summary_src <- spatial_rank_corr %>%
+      group_by(country) %>%
+      summarise(mean_spearman_r  = round(mean(spearman_r,  na.rm = TRUE), 3),
+                pct_r_above_0.8  = round(100 * mean(spearman_r > 0.8, na.rm = TRUE), 1),
+                .groups = "drop")
+    cat("\n=== Spatial rank correlation summary ===\n")
+    print(summary_src, row.names = FALSE)
+    saveRDS(spatial_rank_corr, file.path(VOLUME_PATH, "analysis1_spatial_rank_corr.rds"))
+    message("  Saved: analysis1_spatial_rank_corr.rds")
+  }
+
+  # ---- B. Hotspot agreement map ----------------------------------------------
+  # Hotspot = pixel freq >= 75th percentile within country × config.
+  # Agreement = % of configs where pixel is hotspot.
+
+  hotspot_agreement <- pixel_freq %>%
+    group_by(country, config_id) %>%
+    mutate(hotspot_threshold = quantile(ref_n_events, 0.75, na.rm = TRUE),
+           is_hotspot        = ref_n_events >= hotspot_threshold) %>%
+    ungroup() %>%
+    group_by(country, x, y) %>%
+    summarise(
+      n_configs       = n(),
+      n_hotspot       = sum(is_hotspot, na.rm = TRUE),
+      pct_hotspot     = round(100 * n_hotspot / n_configs, 1),
+      hotspot_robust  = pct_hotspot >= 80,
+      hotspot_uncertain = pct_hotspot > 20 & pct_hotspot < 80,
+      .groups = "drop"
+    )
+
+  cat("\n=== Hotspot agreement summary ===\n")
+  hotspot_agreement %>%
+    group_by(country) %>%
+    summarise(
+      total_pixels    = n(),
+      robust_hotspots = sum(hotspot_robust),
+      uncertain       = sum(hotspot_uncertain),
+      pct_robust      = round(100 * robust_hotspots / total_pixels, 1),
+      .groups = "drop"
+    ) %>%
+    print(row.names = FALSE)
+
+  saveRDS(hotspot_agreement, file.path(VOLUME_PATH, "analysis1_hotspot_agreement.rds"))
+  message("  Saved: analysis1_hotspot_agreement.rds")
+}

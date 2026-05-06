@@ -125,6 +125,14 @@ pct_change_all <- map_dfr(names(char_cols), function(char_name) {
         ),
         1
       ),
+      # Severity (annual_mean_peak) is a negative number: more negative = worse.
+      # Raw formula produces negative pct_change when severity worsens, which
+      # reads as "decrease" — inverted meaning. Flip sign so positive = worsening.
+      pct_change = ifelse(
+        char_name == "severity",
+        -pct_change,
+        pct_change
+      ),
       direction = case_when(
         is.na(pct_change)    ~ "undefined",
         pct_change  > 0      ~ "increase",
@@ -178,10 +186,17 @@ run_friedman <- function(wide_mat, characteristic) {
 
   avg_ranks <- sort(colMeans(rank_mat, na.rm = TRUE))
   R_j       <- colSums(rank_mat, na.rm = TRUE)
-  Q         <- (12 / (n_obs * n_configs * (n_configs + 1))) * sum(R_j^2) -
+  Q_raw     <- (12 / (n_obs * n_configs * (n_configs + 1))) * sum(R_j^2) -
                 3 * n_obs * (n_configs + 1)
-  df        <- n_configs - 1
-  p_val     <- pchisq(Q, df = df, lower.tail = FALSE)
+
+  tie_correction <- mean(apply(wide_mat, 1, function(row) {
+    tbl <- table(row[!is.na(row)])
+    sum(tbl^3 - tbl) / (n_configs * (n_configs^2 - 1))
+  }))
+  Q     <- if (tie_correction < 1) Q_raw / (1 - tie_correction) else Q_raw
+
+  df    <- n_configs - 1
+  p_val <- pchisq(Q, df = df, lower.tail = FALSE)
   S         <- sum((R_j - mean(R_j))^2)
   W         <- 12 * S / (n_obs^2 * (n_configs^3 - n_configs))
 

@@ -220,7 +220,7 @@ apply_gamma_params <- function(pixel_df, params_all) {
     return(pixel_df)
   }
 
-  for (sc_val in c(1, 3, 6)) {
+  for (sc_val in c(1, 3, 6, 12)) {
 
     col_name    <- paste0("spi", sc_val)
     min_obs     <- max(sc_val * 4, 24)
@@ -296,7 +296,7 @@ apply_loglogistic_params <- function(pixel_df, params_all) {
     return(pixel_df)
   }
 
-  for (sc_val in c(1, 3, 6)) {
+  for (sc_val in c(1, 3, 6, 12)) {
 
     col_name    <- paste0("spei", sc_val)
     min_obs     <- max(sc_val * 4, 24)
@@ -368,22 +368,68 @@ message("Saved: era5_gamma_params_ref1973_2002.rds")
 
 
 # =============================================================================
-# STEP 2 — Extract log-logistic params (SPEI) from reference period 1970–1999
+# STEP 2 — Extract log-logistic params (SPEI) from reference period 1973–2002
+# =============================================================================
+# SPEI log-logistic params require water balance (P - PET). ERA5 daily table
+# has no PET column. Water balance is loaded from:
+#   spei_thornthwaite_results.rds (Script 02a) — Thornthwaite PET
+#   spei_penman_results.rds       (Script 02b) — Penman-Monteith PET
+# Both carry a water_balance column (P - PET per pixel per month).
+# Params are fit separately per PET method and saved in one combined file
+# with a pet_method column ("thornthwaite" | "penman").
 # =============================================================================
 
-cat(sprintf("\nExtracting log-logistic params for %d pixels...\n", nrow(pixels)))
+spei_thorn <- tryCatch(
+  readRDS(file.path(VOLUME_PATH, "spei_thornthwaite_results.rds")),
+  error = function(e) { message("WARNING: spei_thornthwaite_results.rds not found — skipping Thornthwaite params"); NULL }
+)
+spei_penman <- tryCatch(
+  readRDS(file.path(VOLUME_PATH, "spei_penman_results.rds")),
+  error = function(e) { message("WARNING: spei_penman_results.rds not found — skipping Penman params"); NULL }
+)
 
-era5_loglogistic_params <- map_dfr(seq_len(nrow(pixels)), function(i) {
-  if (i %% 50 == 0) cat(sprintf("  Pixel %d / %d\n", i, nrow(pixels)))
-  pixel_ts <- monthly_r %>%
-    filter(x == pixels$x[i], y == pixels$y[i]) %>%
-    arrange(year, month)
-  extract_loglogistic_params(pixel_ts, calib_end = CALIB_END)
-})
+wb_sources <- list()
+if (!is.null(spei_thorn)  && "water_balance" %in% names(spei_thorn))
+  wb_sources[["thornthwaite"]] <- spei_thorn  %>% select(x, y, country, year, month, monthly_precip, water_balance)
+if (!is.null(spei_penman) && "water_balance" %in% names(spei_penman))
+  wb_sources[["penman"]]       <- spei_penman %>% select(x, y, country, year, month, monthly_precip, water_balance)
+
+if (length(wb_sources) == 0) {
+  message("WARNING: no water_balance source available — skipping log-logistic param extraction")
+  era5_loglogistic_params <- data.frame()
+} else {
+
+  extract_ll_from_wb <- function(wb_df, pet_method_label) {
+    wb_df <- wb_df %>% arrange(x, y, year, month)
+    px_list <- wb_df %>% select(x, y) %>% distinct()
+    cat(sprintf("  Fitting log-logistic params [%s] for %d pixels...\n",
+                pet_method_label, nrow(px_list)))
+
+    map_dfr(seq_len(nrow(px_list)), function(i) {
+      if (i %% 50 == 0) cat(sprintf("    Pixel %d / %d\n", i, nrow(px_list)))
+      pixel_ts <- wb_df %>%
+        filter(x == px_list$x[i], y == px_list$y[i]) %>%
+        arrange(year, month)
+
+      # Rename water_balance → pet_monthly so extract_loglogistic_params() works unchanged
+      pixel_ts$pet_monthly <- pixel_ts$monthly_precip - pixel_ts$water_balance
+
+      result <- extract_loglogistic_params(pixel_ts, calib_end = CALIB_END)
+      if (nrow(result) > 0) result$pet_method <- pet_method_label
+      result
+    })
+  }
+
+  ll_parts <- mapply(extract_ll_from_wb, wb_sources, names(wb_sources),
+                     SIMPLIFY = FALSE)
+  era5_loglogistic_params <- do.call(rbind, ll_parts)
+}
 
 cat(sprintf("Log-logistic params: %d rows | %d pixels covered\n",
             nrow(era5_loglogistic_params),
-            n_distinct(paste(era5_loglogistic_params$x, era5_loglogistic_params$y))))
+            if (nrow(era5_loglogistic_params) > 0)
+              n_distinct(paste(era5_loglogistic_params$x, era5_loglogistic_params$y))
+            else 0L))
 
 saveRDS(era5_loglogistic_params, file.path(VOLUME_PATH, "era5_loglogistic_params_ref1973_2002.rds"))
 message("Saved: era5_loglogistic_params_ref1973_2002.rds")
@@ -450,59 +496,91 @@ unlink(SPI_TMP, recursive = TRUE)
 # =============================================================================
 # STEP 4 — Apply frozen log-logistic params to full ERA5 series
 # =============================================================================
-# Note: pet_monthly is NA in ERA5 daily table — SPEI water balance (P - PET)
-# will be NA for all pixels. apply_loglogistic_params() handles this gracefully
-# (returns data.frame with spei1/3/6 = NA). Step runs for completeness and to
-# produce the output file structure needed in Phase 3 when PET data is available.
+# Water balance sourced from scripts 02a/02b outputs (same wb_sources built
+# in Step 2). One output file produced per PET method, then combined.
+# pixels with no matching WB source get spei1/3/6 = NA.
 # =============================================================================
 
-SPEI_TMP <- file.path(VOLUME_PATH, "spei_era5_tmp")
-dir.create(SPEI_TMP, showWarnings = FALSE, recursive = TRUE)
+apply_ll_from_wb_source <- function(wb_df, pet_method_label, ll_params_all) {
 
-cat(sprintf("\nApplying frozen log-logistic params to full ERA5 series (%d pixels)...\n",
-            nrow(pixels)))
+  ll_params <- ll_params_all[ll_params_all$pet_method == pet_method_label, ]
+  if (nrow(ll_params) == 0) {
+    message(sprintf("  No log-logistic params for pet_method=%s — skipping apply", pet_method_label))
+    return(data.frame())
+  }
 
-for (i in seq_len(nrow(pixels))) {
-  px_key  <- sprintf("px_%s_%s", gsub("\\.", "p", pixels$x[i]),
-                                  gsub("\\.", "p", pixels$y[i]))
-  out_f   <- file.path(SPEI_TMP, paste0(px_key, ".rds"))
-  if (file.exists(out_f)) next
+  wb_df  <- wb_df %>% arrange(x, y, year, month)
+  px_list <- wb_df %>% select(x, y) %>% distinct()
 
-  pixel_ts <- monthly_r[monthly_r$x == pixels$x[i] &
-                            monthly_r$y == pixels$y[i], ]
-  pixel_ts <- pixel_ts[order(pixel_ts$year, pixel_ts$month), ]
+  SPEI_TMP_M <- file.path(VOLUME_PATH, paste0("spei_era5_tmp_", pet_method_label))
+  dir.create(SPEI_TMP_M, showWarnings = FALSE, recursive = TRUE)
 
-  result <- tryCatch(
-    apply_loglogistic_params(pixel_ts, era5_loglogistic_params),
-    error = function(e) {
-      cat(sprintf("  LogLogistic apply error px %d: %s\n", i, e$message))
-      NULL
+  cat(sprintf("\nApplying log-logistic params [%s] to full ERA5 series (%d pixels)...\n",
+              pet_method_label, nrow(px_list)))
+
+  for (i in seq_len(nrow(px_list))) {
+    px_key <- sprintf("px_%s_%s", gsub("\\.", "p", px_list$x[i]),
+                                   gsub("\\.", "p", px_list$y[i]))
+    out_f  <- file.path(SPEI_TMP_M, paste0(px_key, ".rds"))
+    if (file.exists(out_f)) next
+
+    pixel_ts <- wb_df[wb_df$x == px_list$x[i] & wb_df$y == px_list$y[i], ]
+    pixel_ts <- pixel_ts[order(pixel_ts$year, pixel_ts$month), ]
+    # Reconstruct pet_monthly so apply_loglogistic_params() can compute wb
+    pixel_ts$pet_monthly <- pixel_ts$monthly_precip - pixel_ts$water_balance
+
+    result <- tryCatch(
+      apply_loglogistic_params(pixel_ts, ll_params),
+      error = function(e) {
+        cat(sprintf("  LogLogistic apply error px %d [%s]: %s\n",
+                    i, pet_method_label, e$message))
+        NULL
+      }
+    )
+
+    if (!is.null(result) && nrow(result) > 0) {
+      result$pet_method <- pet_method_label
+      saveRDS(result, out_f)
     }
-  )
 
-  if (!is.null(result) && nrow(result) > 0) {
-    saveRDS(result, out_f)
+    if (i %% 500 == 0) {
+      done <- length(list.files(SPEI_TMP_M, pattern = "\\.rds$"))
+      cat(sprintf("  SPEI apply [%s]: %d / %d pixels written\n",
+                  pet_method_label, done, nrow(px_list)))
+      gc(verbose = FALSE)
+    }
   }
 
-  if (i %% 500 == 0) {
-    done <- length(list.files(SPEI_TMP, pattern = "\\.rds$"))
-    cat(sprintf("  SPEI apply: %d / %d pixels written\n", done, nrow(pixels)))
-    gc(verbose = FALSE)
-  }
+  cat(sprintf("  Combining SPEI pixel files [%s]...\n", pet_method_label))
+  spei_files <- list.files(SPEI_TMP_M, pattern = "\\.rds$", full.names = TRUE)
+  if (length(spei_files) == 0) return(data.frame())
+  result_df  <- do.call(rbind, lapply(spei_files, readRDS))
+  unlink(SPEI_TMP_M, recursive = TRUE)
+  result_df
 }
 
-cat("  Combining SPEI pixel files...\n")
-spei_files <- list.files(SPEI_TMP, pattern = "\\.rds$", full.names = TRUE)
-spei_era5  <- do.call(rbind, lapply(spei_files, readRDS))
-spei_era5$date <- as.Date(sprintf("%d-%02d-01", spei_era5$year, spei_era5$month))
+if (length(wb_sources) == 0 || nrow(era5_loglogistic_params) == 0) {
+  message("WARNING: no WB source or log-logistic params — spei_era5_reference_period.rds will have NA SPEI")
+  spei_era5 <- monthly_r
+  spei_era5$spei1 <- NA_real_
+  spei_era5$spei3 <- NA_real_
+  spei_era5$spei6 <- NA_real_
+  spei_era5$pet_method <- NA_character_
+} else {
+  spei_parts <- mapply(apply_ll_from_wb_source,
+                       wb_sources, names(wb_sources),
+                       MoreArgs = list(ll_params_all = era5_loglogistic_params),
+                       SIMPLIFY = FALSE)
+  spei_era5 <- do.call(rbind, spei_parts)
+}
+
+spei_era5$date   <- as.Date(sprintf("%d-%02d-01", spei_era5$year, spei_era5$month))
 spei_era5$period <- ifelse(spei_era5$year <= CALIB_END,
                             sprintf("%d-%d reference", CALIB_START, CALIB_END),
                             sprintf("%d+ evaluation",  CALIB_END + 1))
 
 saveRDS(spei_era5, file.path(VOLUME_PATH, "spei_era5_reference_period.rds"))
 message("Saved: spei_era5_reference_period.rds")
-
-unlink(SPEI_TMP, recursive = TRUE)
 
 
 # =============================================================================

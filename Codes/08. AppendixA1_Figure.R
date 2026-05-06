@@ -97,7 +97,7 @@ event_rects <- pixel_events %>%
 severity_colours <- c(
   "Mild"     = "#FDE68A",
   "Moderate" = "#FDBA74",
-  "Severe"   = "#F97316",
+  "Severe"   = "#EA580C",
   "Extreme"  = "#991B1B"
 )
 

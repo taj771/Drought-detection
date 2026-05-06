@@ -86,9 +86,13 @@ COUNTRY_FILTER <- c("Argentina", "Benin", "Thailand", "Greece", "Mexico", "South
 # COUNTRY_FILTER <- NULL   # ← uncomment to run on all available pixels
 
 # -- Year range filter --------------------------------------------------------
-# Full period: reference (1970–1999) + comparison (2000–2020) + buffer to 2023.
+# Full period: reference + comparison + buffer to 2023.
 YEAR_FROM <- 1970
 YEAR_TO   <- 2023
+
+# Reference period for frozen params (WMO 30-year minimum; ERA5 starts 1973).
+REF_START <- 1973
+REF_END   <- 2002
 
 # -- Configuration ranges -----------------------------------------------------
 # These define the 75 configurations in Appendix A1 of the analysis plan.
@@ -515,8 +519,9 @@ if (exists("pixels_per_country_pre")) {
   ppc <- NULL
 }
 
-yearly_list    <- vector("list", length(chunk_files))
-n_total_events <- 0L
+yearly_list      <- vector("list", length(chunk_files))
+pixel_freq_list  <- vector("list", length(chunk_files))
+n_total_events   <- 0L
 
 for (i in seq_along(chunk_files)) {
   chunk <- readRDS(chunk_files[[i]])
@@ -565,8 +570,17 @@ for (i in seq_along(chunk_files)) {
                  country, event_year)]
 
     yearly_list[[i]] <- cy
+
+    # Pixel-level freq in reference period — for Script 06 Level 3 spatial tests.
+    # Sum events per pixel × config across ref years only (small accumulator).
+    px_ref <- px_yr[event_year >= REF_START & event_year <= REF_END,
+                    .(ref_n_events = sum(pixel_n_events, na.rm = TRUE)),
+                    keyby = .(config_id, country, x, y)]
+    pixel_freq_list[[i]] <- if (nrow(px_ref) > 0) px_ref else NULL
+
   } else {
-    yearly_list[[i]] <- NULL
+    yearly_list[[i]]     <- NULL
+    pixel_freq_list[[i]] <- NULL
   }
 
   rm(chunk, px_yr)
@@ -650,6 +664,22 @@ if (nrow(drought_annual_summary) > 0) {
   saveRDS(drought_annual_summary,
           file.path(VOLUME_PATH, "drought_annual_summary_ref.rds"))
   message("  drought_annual_summary_ref.rds   — one row per config per country (ERA5 reference)")
+}
+
+# Pixel-level frequency in reference period — used by Script 06 Level 3 spatial tests.
+non_null_pf <- Filter(Negate(is.null), pixel_freq_list)
+rm(pixel_freq_list); gc()
+if (length(non_null_pf) > 0) {
+  pixel_freq_ref <- rbindlist(non_null_pf, use.names = TRUE, fill = TRUE)
+  rm(non_null_pf)
+  # Sum across configs that appear in multiple chunks (shouldn't happen but guard)
+  pixel_freq_ref <- pixel_freq_ref[, .(ref_n_events = sum(ref_n_events, na.rm = TRUE)),
+                                    keyby = .(config_id, country, x, y)]
+  saveRDS(pixel_freq_ref, file.path(VOLUME_PATH, "pixel_freq_ref.rds"))
+  message("  pixel_freq_ref.rds               — per-pixel event count in ref period (Script 06 Level 3)")
+  rm(pixel_freq_ref); gc()
+} else {
+  message("  pixel_freq_ref.rds               — SKIPPED (no country column in chunks)")
 }
 
 message("\n=== Script 03 complete ===")
