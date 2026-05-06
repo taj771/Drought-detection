@@ -1,0 +1,40 @@
+# R
+.Rproj.user
+.Rhistory
+.RData
+.RDataTmp
+.Ruserdata
+
+# Data and outputs
+Figures/
+Data/
+*.rds
+*.csv
+*.nc
+*.jpg
+*.jpeg
+*.png
+*.pdf
+*.docx
+*.tex
+*.html
+*_files/
+
+# Quarto
+/.quarto/
+**/*.quarto_ipynb
+
+# IDE and tooling
+.positai
+.databricks
+.vscode
+typings/
+
+# Old scripts
+Codes/old/
+
+# QMD workflow documents
+*.qmd
+
+# Temp/junk
+COMP_START

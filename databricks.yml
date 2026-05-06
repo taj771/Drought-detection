@@ -1,0 +1,47 @@
+# Databricks asset bundle — Drought Index Pipeline
+# See https://docs.databricks.com/dev-tools/bundles/index.html
+
+bundle:
+  name: Drought-indices
+
+sync:
+  include:
+    - "Codes/**"
+    - "*.yml"
+  exclude:
+    - ".vscode/**"
+    - ".databricks/**"
+    - "*_files/**"
+    - "*.html"
+    - "*.pdf"
+    - "*.docx"
+    - "*.tex"
+    - "*.png"
+    - "*.jpg"
+    - "*.rds"
+    - "Data/**"
+    - "typings/**"
+
+targets:
+  dev:
+    default: true
+    workspace:
+      host: https://dbc-9c907c32-f434.cloud.databricks.com
+      root_path: ~/Drought-indices
+
+  ## Optionally, there could be 'staging' or 'prod' targets here.
+  #
+  # prod:
+  #   workspace:
+  #     host: https://dbc-9c907c32-f434.cloud.databricks.com
+
+resources:
+  jobs:
+    drought_pipeline:
+      name: "Drought Index Pipeline — Phase 1"
+      tasks:
+        - task_key: run_pipeline
+          existing_cluster_id: 0123-211315-fp4hw1e8
+          notebook_task:
+            notebook_path: /Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes/00. MASTER_RUN_databricks
+            source: WORKSPACE
