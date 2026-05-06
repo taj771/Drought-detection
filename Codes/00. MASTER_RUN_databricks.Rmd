@@ -47,7 +47,19 @@ if (RUN_SPEI_T) {
   message("================================================================")
   message("STEP 2a: SPEI Calculation — Thornthwaite PET")
   message("================================================================")
-  source(file.path(CODES_PATH, "02a. SPEI_Calculation_Thornthwaite.R"))
+  tryCatch(
+    source(file.path(CODES_PATH, "02a. SPEI_Calculation_Thornthwaite.R")),
+    error = function(e) {
+      err_msg <- paste0(
+        "SCRIPT 02a ERROR at ", Sys.time(), "\n",
+        conditionMessage(e), "\n",
+        paste(capture.output(traceback()), collapse = "\n")
+      )
+      writeLines(err_msg, "/Volumes/projects/gwsc_drought/drought_outputs/script02a_error.txt")
+      message("ERROR WRITTEN TO VOLUME: script02a_error.txt")
+      stop(e)
+    }
+  )
 }
 ```
 
@@ -57,7 +69,19 @@ if (RUN_SPEI_P) {
   message("STEP 2b: SPEI Calculation — Penman-Monteith PET")
   message("  Requires: PET_data_prep/ steps completed first")
   message("================================================================")
-  source(file.path(CODES_PATH, "02b. SPEI_Calculation_Penman.R"))
+  tryCatch(
+    source(file.path(CODES_PATH, "02b. SPEI_Calculation_Penman.R")),
+    error = function(e) {
+      err_msg <- paste0(
+        "SCRIPT 02b ERROR at ", Sys.time(), "\n",
+        conditionMessage(e), "\n",
+        paste(capture.output(traceback()), collapse = "\n")
+      )
+      writeLines(err_msg, "/Volumes/projects/gwsc_drought/drought_outputs/script02b_error.txt")
+      message("ERROR WRITTEN TO VOLUME: script02b_error.txt")
+      stop(e)
+    }
+  )
 }
 ```
 
@@ -106,9 +130,21 @@ if (RUN_SANITY) {
 ```{r step5-ref-params}
 if (RUN_REF_PARAMS) {
   message("================================================================")
-  message("STEP 5: Reference Period Parameters (1970–2000)")
+  message("STEP 5: Reference Period Parameters (1973–2002)")
   message("================================================================")
-  source(file.path(CODES_PATH, "05. Reference_Period_Params.R"))
+  tryCatch(
+    source(file.path(CODES_PATH, "05. Reference_Period_Params.R")),
+    error = function(e) {
+      err_msg <- paste0(
+        "SCRIPT 05 ERROR at ", Sys.time(), "\n",
+        conditionMessage(e), "\n",
+        paste(capture.output(traceback()), collapse = "\n")
+      )
+      writeLines(err_msg, "/Volumes/projects/gwsc_drought/drought_outputs/script05_error.txt")
+      message("ERROR WRITTEN TO VOLUME: script05_error.txt")
+      stop(e)
+    }
+  )
 }
 ```
 
@@ -117,7 +153,19 @@ if (RUN_FRIEDMAN) {
   message("================================================================")
   message("STEP 6: Analysis 1 — Friedman + Nemenyi")
   message("================================================================")
-  source(file.path(CODES_PATH, "06. Analysis1_Friedman.R"))
+  tryCatch(
+    source(file.path(CODES_PATH, "06. Analysis1_Friedman.R")),
+    error = function(e) {
+      err_msg <- paste0(
+        "SCRIPT 06 ERROR at ", Sys.time(), "\n",
+        conditionMessage(e), "\n",
+        paste(capture.output(traceback()), collapse = "\n")
+      )
+      writeLines(err_msg, "/Volumes/projects/gwsc_drought/drought_outputs/script06_error.txt")
+      message("ERROR WRITTEN TO VOLUME: script06_error.txt")
+      stop(e)
+    }
+  )
 }
 ```
 
@@ -126,7 +174,19 @@ if (RUN_CROSSPERIOD) {
   message("================================================================")
   message("STEP 7: Analysis 2 — Cross-Period Comparison")
   message("================================================================")
-  source(file.path(CODES_PATH, "07. Analysis2_CrossPeriod.R"))
+  tryCatch(
+    source(file.path(CODES_PATH, "07. Analysis2_CrossPeriod.R")),
+    error = function(e) {
+      err_msg <- paste0(
+        "SCRIPT 07 ERROR at ", Sys.time(), "\n",
+        conditionMessage(e), "\n",
+        paste(capture.output(traceback()), collapse = "\n")
+      )
+      writeLines(err_msg, "/Volumes/projects/gwsc_drought/drought_outputs/script07_error.txt")
+      message("ERROR WRITTEN TO VOLUME: script07_error.txt")
+      stop(e)
+    }
+  )
 }
 ```
 
@@ -135,7 +195,19 @@ if (RUN_APPENDIX) {
   message("================================================================")
   message("STEP 8: Appendix A1 Figure")
   message("================================================================")
-  source(file.path(CODES_PATH, "08. AppendixA1_Figure.R"))
+  tryCatch(
+    source(file.path(CODES_PATH, "08. AppendixA1_Figure.R")),
+    error = function(e) {
+      err_msg <- paste0(
+        "SCRIPT 08 ERROR at ", Sys.time(), "\n",
+        conditionMessage(e), "\n",
+        paste(capture.output(traceback()), collapse = "\n")
+      )
+      writeLines(err_msg, "/Volumes/projects/gwsc_drought/drought_outputs/script08_error.txt")
+      message("ERROR WRITTEN TO VOLUME: script08_error.txt")
+      stop(e)
+    }
+  )
 }
 ```
 
@@ -144,7 +216,19 @@ if (RUN_CDD_COMP) {
   message("================================================================")
   message("STEP 9: Analysis 3 — CDD vs SPI/SPEI Frequency Comparison")
   message("================================================================")
-  source(file.path(CODES_PATH, "09. CDD_SPI_Comparison.R"))
+  tryCatch(
+    source(file.path(CODES_PATH, "09. CDD_SPI_Comparison.R")),
+    error = function(e) {
+      err_msg <- paste0(
+        "SCRIPT 09 ERROR at ", Sys.time(), "\n",
+        conditionMessage(e), "\n",
+        paste(capture.output(traceback()), collapse = "\n")
+      )
+      writeLines(err_msg, "/Volumes/projects/gwsc_drought/drought_outputs/script09_error.txt")
+      message("ERROR WRITTEN TO VOLUME: script09_error.txt")
+      stop(e)
+    }
+  )
 }
 ```
 
