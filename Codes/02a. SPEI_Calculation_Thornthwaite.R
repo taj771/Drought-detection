@@ -109,10 +109,9 @@ safe_spei <- function(precip_vec, temp_vec, lat, scale = 3) {
     }
 
     # Step 2a: Thornthwaite PET (°C required).
-    # ERA5 mean_temp is stored in Kelvin in the Databricks catalog.
-    # Detect by checking median: Kelvin values cluster ~273-310, Celsius ~0-37.
-    temp_c <- if (median(temp_vec, na.rm = TRUE) > 100) temp_vec - 273.15 else temp_vec
-    pet <- as.numeric(thornthwaite(temp_c, lat = lat))
+    # ERA5 mean_temp confirmed stored as °C in GWSC Databricks catalog
+    # (Thailand range: 6.7–37.9°C, avg 26.2°C — verified 2026-05-06).
+    pet <- as.numeric(thornthwaite(temp_vec, lat = lat))
 
     # Step 2b: Water balance
     water_balance <- precip_vec - pet
