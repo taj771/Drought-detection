@@ -24,7 +24,7 @@
 #   - Databricks cluster accessible (for ERA5 precipitation data)
 #
 # Output: spei_penman_results.rds — one row per pixel per month,
-#         columns: x, y, year, month, spei1, spei3, spei6, spei12
+#         columns: x, y, country, year, month, spei1, spei3, spei6, spei12
 # =============================================================================
 
 
@@ -204,7 +204,7 @@ safe_spei_penman <- function(wb_vec, scale = 3) {
 # Data MUST be chronologically sorted before grouping.
 spei_penman_results <- monthly_pet |>
   arrange(x, y, year, month) |>
-  group_by(x, y) |>
+  group_by(x, y, country) |>
   mutate(
     spei1  = safe_spei_penman(water_balance, scale = 1),
     spei3  = safe_spei_penman(water_balance, scale = 3),
