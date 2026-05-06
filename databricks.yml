@@ -1,6 +1,5 @@
-# This is a Databricks asset bundle definition for Drought-indices.
-# The Databricks extension requires databricks.yml configuration file.
-# See https://docs.databricks.com/dev-tools/bundles/index.html for documentation.
+# Databricks asset bundle — Drought Index Pipeline
+# See https://docs.databricks.com/dev-tools/bundles/index.html
 
 bundle:
   name: Drought-indices
@@ -8,7 +7,6 @@ bundle:
 sync:
   include:
     - "Codes/**"
-    - "*.qmd"
     - "*.yml"
   exclude:
     - ".vscode/**"
