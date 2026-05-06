@@ -232,21 +232,21 @@ Phase 2 introduces a fixed reference period to enable consistent comparison of d
 
 Two time periods are defined:
 
-- **Reference period** — 1970 to 1999, centred on 1984–1985. The Gamma and log-logistic distribution parameters are estimated from ERA5 data covering this period only. These parameters define what constitutes normal hydroclimatic conditions and remain fixed throughout the analysis.
+- **Reference period** — 1973 to 2002, centred on 1987–1988. The Gamma and log-logistic distribution parameters are estimated from ERA5 data covering this period only. These parameters define what constitutes normal hydroclimatic conditions and remain fixed throughout the analysis. Note: ERA5 data in the Databricks catalog begins in 1973; this period gives the full WMO-recommended 30 years.
 
-- **Comparison period** — 2000 to 2020. SPI and SPEI values for this period are calculated by applying the reference period distribution parameters rather than refitting the distribution to the more recent data. This ensures that any shift in drought characteristics reflects a genuine change relative to the historical baseline rather than a change in the statistical reference frame. Note: the reference period ends in 1999 and the comparison period begins in 2000 — there is no overlap between the two periods.
+- **Comparison period** — 2003 to 2023. SPI and SPEI values for this period are calculated by applying the reference period distribution parameters rather than refitting the distribution to the more recent data. This ensures that any shift in drought characteristics reflects a genuine change relative to the historical baseline rather than a change in the statistical reference frame. Note: the reference period ends in 2002 and the comparison period begins in 2003 — there is no overlap between the two periods.
 
 ::: callout-note
-The WMO recommends a minimum of 30 years when estimating distributional parameters for drought indices. Our reference window of 1970–1999 (30 years) meets this recommendation exactly and provides sufficient monthly observations per calendar month and accumulation period to reliably estimate Gamma and log-logistic distribution parameters at each grid cell. The pipeline is designed with full flexibility to redefine the reference period boundaries, and the final choice will be agreed with the project team.
+The WMO recommends a minimum of 30 years when estimating distributional parameters for drought indices. Our reference window of 1973–2002 (30 years) meets this recommendation exactly and provides sufficient monthly observations per calendar month and accumulation period to reliably estimate Gamma and log-logistic distribution parameters at each grid cell. The pipeline is designed with full flexibility to redefine the reference period boundaries, and the final choice will be agreed with the project team.
 :::
 
 **Step 2: Estimate and store distribution parameters from the reference period**
 
-Using ERA5 precipitation and water balance data from the reference period (1970–1999), the Gamma distribution parameters ($\alpha$, $\beta$) for SPI and the log-logistic distribution parameters ($\alpha$, $\beta$, $\gamma$) for SPEI are estimated separately for each grid cell, calendar month, and accumulation period. These parameters are stored and carried forward as the fixed reference distribution and are not updated or re-estimated at any later stage of the analysis.
+Using ERA5 precipitation and water balance data from the reference period (1973–2002), the Gamma distribution parameters ($\alpha$, $\beta$) for SPI and the log-logistic distribution parameters ($\alpha$, $\beta$, $\gamma$) for SPEI are estimated separately for each grid cell, calendar month, and accumulation period. These parameters are stored and carried forward as the fixed reference distribution and are not updated or re-estimated at any later stage of the analysis.
 
 **Step 3: Apply reference period parameters to the comparison period**
 
-The stored reference period parameters are applied to ERA5 data from the comparison period (2000–2020) to calculate SPI and SPEI values. Because the distributional parameters are held constant, the resulting index values express conditions in the comparison period as anomalies relative to the 1970–1999 baseline. A systematic shift towards more negative or positive SPI or SPEI values in the comparison period therefore reflects a genuine change in hydroclimatic conditions rather than a statistical artefact of the reference frame.
+The stored reference period parameters are applied to ERA5 data from the comparison period (2003–2023) to calculate SPI and SPEI values. Because the distributional parameters are held constant, the resulting index values express conditions in the comparison period as anomalies relative to the 1973–2002 baseline. A systematic shift towards more negative or positive SPI or SPEI values in the comparison period therefore reflects a genuine change in hydroclimatic conditions rather than a statistical artefact of the reference frame.
 
 ## 2.2 Spatial aggregation and heterogeneity {.unnumbered}
 
@@ -288,7 +288,7 @@ The evaluation has two analyses, each answering a distinct question.
 
 ### 2.3.1: Analysis 1 : Do definitions agree on drought characteristics? {.unnumbered}
 
-This analysis asks whether configurations behave consistently within the reference period (1970–1999). The full set of configurations tested is listed in Appendix A1. For each configuration, the five drought characteristics (frequency, duration, severity, CV, and percent area affected) are calculated annually across the reference period, giving one value per characteristic per year per configuration. These annual values are the input to the statistical tests below.
+This analysis asks whether configurations behave consistently within the reference period (1973–2002). The full set of configurations tested is listed in Appendix A1. For each configuration, the five drought characteristics (frequency, duration, severity, CV, and percent area affected) are calculated annually across the reference period, giving one value per characteristic per year per configuration. These annual values are the input to the statistical tests below.
 
 ::: callout-note
 Each Friedman test runs on country-level annual averages. Pixels are averaged within country boundaries first, then the test runs separately for each country, giving one set of equivalence groups per country.
@@ -362,7 +362,7 @@ GWSC will prioritise definitions that capture a middle range of spatial extent, 
 
 ### 2.3.2: Analysis 2: Do definitions agree on how drought has changed over time? {.unnumbered}
 
-This analysis asks whether all configurations tell the same story about how drought characteristics shifted between the reference period (1970–1999) and the comparison period (2000–2020).
+This analysis asks whether all configurations tell the same story about how drought characteristics shifted between the reference period (1973–2002) and the comparison period (2003–2023).
 
 **Step 1: Calculate percentage change between periods**
 
@@ -376,9 +376,9 @@ Two configurations can produce identical percentage change values while sitting 
 
 **Step 2: Test whether definitions agree on the direction and magnitude of change**
 
-The Friedman test is run a second time, now on the 21 annual values from the comparison period (2000–2020).[^2] For each year, configurations are ranked by each drought characteristic from lowest to highest, producing a ranking table with 21 rows (one per year) and one column per configuration. Friedman asks whether any configuration consistently ranks higher or lower across those 21 years. This is a statistically valid test: 21 annual observations provide sufficient data points for the Friedman test to detect systematic differences between configurations.
+The Friedman test is run a second time, now on the 21 annual values from the comparison period (2003–2023).[^2] For each year, configurations are ranked by each drought characteristic from lowest to highest, producing a ranking table with 21 rows (one per year) and one column per configuration. Friedman asks whether any configuration consistently ranks higher or lower across those 21 years. This is a statistically valid test: 21 annual observations provide sufficient data points for the Friedman test to detect systematic differences between configurations.
 
-[^2]: The 21 annual observations here refer to the comparison period (2000–2020). Analysis 1 used 30 annual observations from the reference period (1970–1999). The two Friedman tests operate independently on their own period data and should not be confused. The cross-period rank comparison described later in this step is a descriptive summary, not a third statistical test.
+[^2]: The 21 annual observations here refer to the comparison period (2003–2023). Analysis 1 used 30 annual observations from the reference period (1973–2002). The two Friedman tests operate independently on their own period data and should not be confused. The cross-period rank comparison described later in this step is a descriptive summary, not a third statistical test.
 
 The cross-period comparison (checking whether rank order shifted between the reference and comparison periods) is a descriptive step, not a statistical test. Each Friedman runs within its own period. What comes out of each is one average rank per configuration. Comparing those two average ranks tells us whether the ordering changed, but with only two data points per configuration (one average rank per period), no formal test is applied. The interpretation is: did configuration A, which ranked first in the reference period, still rank first in the comparison period?
 
@@ -568,77 +568,77 @@ EP12-T-150 & SPEI & Penman-Monteith & 12 months & Threshold & $-$1.5 \\
 ::: {.content-visible when-format="docx"}
 | Config ID  | Index | PET Method      | Accum.    | Method     | Threshold |
 |------------|-------|-----------------|-----------|------------|-----------|
-| S1-T-000   | SPI   | --              | 1 month   | Threshold  | < 0       |
+| S1-T-000   | SPI   | --              | 1 month   | Threshold  | \< 0      |
 | S1-T-025   | SPI   | --              | 1 month   | Threshold  | -0.25     |
 | S1-T-050   | SPI   | --              | 1 month   | Threshold  | -0.5      |
 | S1-T-100   | SPI   | --              | 1 month   | Threshold  | -1.0      |
 | S1-T-150   | SPI   | --              | 1 month   | Threshold  | -1.5      |
-| S1-C-000   | SPI   | --              | 1 month   | Cumulative | < 0       |
+| S1-C-000   | SPI   | --              | 1 month   | Cumulative | \< 0      |
 | S1-C-025   | SPI   | --              | 1 month   | Cumulative | -0.25     |
 | S1-C-050   | SPI   | --              | 1 month   | Cumulative | -0.5      |
 | S1-C-100   | SPI   | --              | 1 month   | Cumulative | -1.0      |
 | S1-C-150   | SPI   | --              | 1 month   | Cumulative | -1.5      |
-| S3-T-000   | SPI   | --              | 3 months  | Threshold  | < 0       |
+| S3-T-000   | SPI   | --              | 3 months  | Threshold  | \< 0      |
 | S3-T-025   | SPI   | --              | 3 months  | Threshold  | -0.25     |
 | S3-T-050   | SPI   | --              | 3 months  | Threshold  | -0.5      |
 | S3-T-100   | SPI   | --              | 3 months  | Threshold  | -1.0      |
 | S3-T-150   | SPI   | --              | 3 months  | Threshold  | -1.5      |
-| S6-T-000   | SPI   | --              | 6 months  | Threshold  | < 0       |
+| S6-T-000   | SPI   | --              | 6 months  | Threshold  | \< 0      |
 | S6-T-025   | SPI   | --              | 6 months  | Threshold  | -0.25     |
 | S6-T-050   | SPI   | --              | 6 months  | Threshold  | -0.5      |
 | S6-T-100   | SPI   | --              | 6 months  | Threshold  | -1.0      |
 | S6-T-150   | SPI   | --              | 6 months  | Threshold  | -1.5      |
-| S12-T-000  | SPI   | --              | 12 months | Threshold  | < 0       |
+| S12-T-000  | SPI   | --              | 12 months | Threshold  | \< 0      |
 | S12-T-025  | SPI   | --              | 12 months | Threshold  | -0.25     |
 | S12-T-050  | SPI   | --              | 12 months | Threshold  | -0.5      |
 | S12-T-100  | SPI   | --              | 12 months | Threshold  | -1.0      |
 | S12-T-150  | SPI   | --              | 12 months | Threshold  | -1.5      |
-| ET1-T-000  | SPEI  | Thornthwaite    | 1 month   | Threshold  | < 0       |
+| ET1-T-000  | SPEI  | Thornthwaite    | 1 month   | Threshold  | \< 0      |
 | ET1-T-025  | SPEI  | Thornthwaite    | 1 month   | Threshold  | -0.25     |
 | ET1-T-050  | SPEI  | Thornthwaite    | 1 month   | Threshold  | -0.5      |
 | ET1-T-100  | SPEI  | Thornthwaite    | 1 month   | Threshold  | -1.0      |
 | ET1-T-150  | SPEI  | Thornthwaite    | 1 month   | Threshold  | -1.5      |
-| ET1-C-000  | SPEI  | Thornthwaite    | 1 month   | Cumulative | < 0       |
+| ET1-C-000  | SPEI  | Thornthwaite    | 1 month   | Cumulative | \< 0      |
 | ET1-C-025  | SPEI  | Thornthwaite    | 1 month   | Cumulative | -0.25     |
 | ET1-C-050  | SPEI  | Thornthwaite    | 1 month   | Cumulative | -0.5      |
 | ET1-C-100  | SPEI  | Thornthwaite    | 1 month   | Cumulative | -1.0      |
 | ET1-C-150  | SPEI  | Thornthwaite    | 1 month   | Cumulative | -1.5      |
-| ET3-T-000  | SPEI  | Thornthwaite    | 3 months  | Threshold  | < 0       |
+| ET3-T-000  | SPEI  | Thornthwaite    | 3 months  | Threshold  | \< 0      |
 | ET3-T-025  | SPEI  | Thornthwaite    | 3 months  | Threshold  | -0.25     |
 | ET3-T-050  | SPEI  | Thornthwaite    | 3 months  | Threshold  | -0.5      |
 | ET3-T-100  | SPEI  | Thornthwaite    | 3 months  | Threshold  | -1.0      |
 | ET3-T-150  | SPEI  | Thornthwaite    | 3 months  | Threshold  | -1.5      |
-| ET6-T-000  | SPEI  | Thornthwaite    | 6 months  | Threshold  | < 0       |
+| ET6-T-000  | SPEI  | Thornthwaite    | 6 months  | Threshold  | \< 0      |
 | ET6-T-025  | SPEI  | Thornthwaite    | 6 months  | Threshold  | -0.25     |
 | ET6-T-050  | SPEI  | Thornthwaite    | 6 months  | Threshold  | -0.5      |
 | ET6-T-100  | SPEI  | Thornthwaite    | 6 months  | Threshold  | -1.0      |
 | ET6-T-150  | SPEI  | Thornthwaite    | 6 months  | Threshold  | -1.5      |
-| ET12-T-000 | SPEI  | Thornthwaite    | 12 months | Threshold  | < 0       |
+| ET12-T-000 | SPEI  | Thornthwaite    | 12 months | Threshold  | \< 0      |
 | ET12-T-025 | SPEI  | Thornthwaite    | 12 months | Threshold  | -0.25     |
 | ET12-T-050 | SPEI  | Thornthwaite    | 12 months | Threshold  | -0.5      |
 | ET12-T-100 | SPEI  | Thornthwaite    | 12 months | Threshold  | -1.0      |
 | ET12-T-150 | SPEI  | Thornthwaite    | 12 months | Threshold  | -1.5      |
-| EP1-T-000  | SPEI  | Penman-Monteith | 1 month   | Threshold  | < 0       |
+| EP1-T-000  | SPEI  | Penman-Monteith | 1 month   | Threshold  | \< 0      |
 | EP1-T-025  | SPEI  | Penman-Monteith | 1 month   | Threshold  | -0.25     |
 | EP1-T-050  | SPEI  | Penman-Monteith | 1 month   | Threshold  | -0.5      |
 | EP1-T-100  | SPEI  | Penman-Monteith | 1 month   | Threshold  | -1.0      |
 | EP1-T-150  | SPEI  | Penman-Monteith | 1 month   | Threshold  | -1.5      |
-| EP1-C-000  | SPEI  | Penman-Monteith | 1 month   | Cumulative | < 0       |
+| EP1-C-000  | SPEI  | Penman-Monteith | 1 month   | Cumulative | \< 0      |
 | EP1-C-025  | SPEI  | Penman-Monteith | 1 month   | Cumulative | -0.25     |
 | EP1-C-050  | SPEI  | Penman-Monteith | 1 month   | Cumulative | -0.5      |
 | EP1-C-100  | SPEI  | Penman-Monteith | 1 month   | Cumulative | -1.0      |
 | EP1-C-150  | SPEI  | Penman-Monteith | 1 month   | Cumulative | -1.5      |
-| EP3-T-000  | SPEI  | Penman-Monteith | 3 months  | Threshold  | < 0       |
+| EP3-T-000  | SPEI  | Penman-Monteith | 3 months  | Threshold  | \< 0      |
 | EP3-T-025  | SPEI  | Penman-Monteith | 3 months  | Threshold  | -0.25     |
 | EP3-T-050  | SPEI  | Penman-Monteith | 3 months  | Threshold  | -0.5      |
 | EP3-T-100  | SPEI  | Penman-Monteith | 3 months  | Threshold  | -1.0      |
 | EP3-T-150  | SPEI  | Penman-Monteith | 3 months  | Threshold  | -1.5      |
-| EP6-T-000  | SPEI  | Penman-Monteith | 6 months  | Threshold  | < 0       |
+| EP6-T-000  | SPEI  | Penman-Monteith | 6 months  | Threshold  | \< 0      |
 | EP6-T-025  | SPEI  | Penman-Monteith | 6 months  | Threshold  | -0.25     |
 | EP6-T-050  | SPEI  | Penman-Monteith | 6 months  | Threshold  | -0.5      |
 | EP6-T-100  | SPEI  | Penman-Monteith | 6 months  | Threshold  | -1.0      |
 | EP6-T-150  | SPEI  | Penman-Monteith | 6 months  | Threshold  | -1.5      |
-| EP12-T-000 | SPEI  | Penman-Monteith | 12 months | Threshold  | < 0       |
+| EP12-T-000 | SPEI  | Penman-Monteith | 12 months | Threshold  | \< 0      |
 | EP12-T-025 | SPEI  | Penman-Monteith | 12 months | Threshold  | -0.25     |
 | EP12-T-050 | SPEI  | Penman-Monteith | 12 months | Threshold  | -0.5      |
 | EP12-T-100 | SPEI  | Penman-Monteith | 12 months | Threshold  | -1.0      |

@@ -4,8 +4,8 @@
 # =============================================================================
 # Analysis Plan Reference: Phase 2 Section 2.3.2
 #
-# Step 1: % change in each characteristic between reference (1970–1999) and
-#         comparison (2000–2020) periods.
+# Step 1: % change in each characteristic between reference (1973–2002) and
+#         comparison (2003–2023) periods.
 # Step 2: Friedman test on comparison period annual values (n=21 years).
 # Step 3: Rank stability check — compare avg rank order between periods.
 #
@@ -30,10 +30,10 @@ library(tidyr)
 
 # -- Configuration ------------------------------------------------------------
 VOLUME_PATH  <- "/Volumes/projects/gwsc_drought/drought_outputs"
-REF_START    <- 1970
-REF_END      <- 1999
-COMP_START   <- 2000
-COMP_END     <- 2020
+REF_START    <- 1973
+REF_END      <- 2002
+COMP_START   <- 2003
+COMP_END     <- 2023
 P_THRESHOLD  <- 0.05
 
 

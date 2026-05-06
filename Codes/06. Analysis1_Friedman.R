@@ -21,7 +21,7 @@
 #
 # Inputs:
 #   VOLUME_PATH/drought_annual_summary_ref.rds  — one row per config × country × year
-#   (reference period 1970–1999, produced after Script 05 run confirms)
+#   (reference period 1973–2002, produced after Script 05 run confirms)
 #
 # Outputs (VOLUME_PATH):
 #   analysis1_friedman_results.rds   — Friedman p, W, df per characteristic
@@ -39,8 +39,8 @@ library(tidyr)
 
 # -- Configuration ------------------------------------------------------------
 VOLUME_PATH  <- "/Volumes/projects/gwsc_drought/drought_outputs"
-REF_START    <- 1970
-REF_END      <- 1999
+REF_START    <- 1973
+REF_END      <- 2002
 P_THRESHOLD  <- 0.05
 
 

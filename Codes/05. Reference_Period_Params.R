@@ -4,8 +4,10 @@
 # Analysis Plan Reference: Phase 2 Section 2.1
 #
 # Extracts and freezes distribution parameters fitted on ERA5 reference period
-# (1970–1999), then applies them to the full ERA5 series. Frozen params are
+# (1973–2002), then applies them to the full ERA5 series. Frozen params are
 # used in Phase 3 to apply identical standardisation to CMIP data.
+# Note: ERA5 data available from 1973; reference period 1973–2002 = 30 years
+# (WMO minimum). Comparison period: 2003–2023.
 #
 # SPI  — Gamma distribution (α, β per pixel × scale × calendar month)
 # SPEI — Log-logistic distribution (ξ, α, κ per pixel × scale × calendar month)
@@ -15,8 +17,8 @@
 #     catalog: projects | schema: gwsc_drought | table: era5_monthly
 #
 # Outputs (written to Unity Catalog Volume):
-#   - /Volumes/projects/gwsc_drought/drought_outputs/era5_gamma_params_ref1970_1999.rds
-#   - /Volumes/projects/gwsc_drought/drought_outputs/era5_loglogistic_params_ref1970_1999.rds
+#   - /Volumes/projects/gwsc_drought/drought_outputs/era5_gamma_params_ref1973_2002.rds
+#   - /Volumes/projects/gwsc_drought/drought_outputs/era5_loglogistic_params_ref1973_2002.rds
 #   - /Volumes/projects/gwsc_drought/drought_outputs/spi_era5_reference_period.rds
 #   - /Volumes/projects/gwsc_drought/drought_outputs/spei_era5_reference_period.rds
 # =============================================================================
@@ -33,8 +35,8 @@ library(purrr)
 
 
 # -- Configuration ------------------------------------------------------------
-CALIB_START <- 1970
-CALIB_END   <- 1999
+CALIB_START <- 1973
+CALIB_END   <- 2002
 CATALOG     <- "projects"
 SCHEMA      <- "xx_drought_index"    # same schema as scripts 01/02a/02b
 TABLE       <- "drought_index_dailysummary"  # daily table — aggregate below
@@ -361,8 +363,8 @@ cat(sprintf("Gamma params: %d rows | %d pixels covered\n",
             nrow(era5_gamma_params),
             n_distinct(paste(era5_gamma_params$x, era5_gamma_params$y))))
 
-saveRDS(era5_gamma_params, file.path(VOLUME_PATH, "era5_gamma_params_ref1970_1999.rds"))
-message("Saved: era5_gamma_params_ref1970_1999.rds")
+saveRDS(era5_gamma_params, file.path(VOLUME_PATH, "era5_gamma_params_ref1973_2002.rds"))
+message("Saved: era5_gamma_params_ref1973_2002.rds")
 
 
 # =============================================================================
@@ -383,8 +385,8 @@ cat(sprintf("Log-logistic params: %d rows | %d pixels covered\n",
             nrow(era5_loglogistic_params),
             n_distinct(paste(era5_loglogistic_params$x, era5_loglogistic_params$y))))
 
-saveRDS(era5_loglogistic_params, file.path(VOLUME_PATH, "era5_loglogistic_params_ref1970_1999.rds"))
-message("Saved: era5_loglogistic_params_ref1970_1999.rds")
+saveRDS(era5_loglogistic_params, file.path(VOLUME_PATH, "era5_loglogistic_params_ref1973_2002.rds"))
+message("Saved: era5_loglogistic_params_ref1973_2002.rds")
 
 
 # =============================================================================
@@ -525,5 +527,5 @@ spi_era5 %>%
   print()
 
 message("Script 05 complete — reference period params frozen and applied.")
-message("Outputs: era5_gamma_params_ref1970_1999.rds | era5_loglogistic_params_ref1970_1999.rds")
+message("Outputs: era5_gamma_params_ref1973_2002.rds | era5_loglogistic_params_ref1973_2002.rds")
 message("         spi_era5_reference_period.rds | spei_era5_reference_period.rds")
