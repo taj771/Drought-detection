@@ -1,10 +1,12 @@
+# R
 .Rproj.user
 .Rhistory
-.RData/
+.RData
+.RDataTmp
 .Ruserdata
 
+# Data and outputs
 Figures/
-
 Data/
 *.rds
 *.csv
@@ -13,24 +15,28 @@ Data/
 *.jpeg
 *.png
 *.pdf
+*.docx
+*.tex
+*.html
+*_files/
 
-
-
+# Quarto
 /.quarto/
 **/*.quarto_ipynb
 
-
-#git rm -r --cached Data
-#git commit -m "Stop tracking Data folder"
-#git push
+# IDE and tooling
 .positai
-
 .databricks
 .vscode
+typings/
 
-# Junk/temp files
-.RDataTmp
-*.docx
+# Old scripts
+Codes/old/
+
+# QMD workflow documents
+*.qmd
+
+# Temp/junk
 COMP_START
 0)
 0.05)
@@ -39,16 +45,3 @@ COMP_START
 120)
 24
 50)
-
-typings/
-
-# Old/exploratory scripts — not for GWSC repo
-Codes/old/
-
-# QMD workflow documents — internal only
-Drought\ Matrices\ -\ Data\ Science\ Workflow.qmd
-Drought\ Matrices\ -\ Data\ Science\ Workflow\ -\ Phase\ 2.qmd
-Drought\ Calculation\ daily\ clarification.qmd
-*.html
-*.tex
-*_files/
