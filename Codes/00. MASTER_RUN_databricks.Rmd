@@ -27,10 +27,10 @@ RUN_SPEI_P     <- FALSE  # Script 02b: DONE 2026-05-06
 RUN_DETECTION  <- FALSE  # Script 03: DONE 2026-05-07 (summaries + all_drought_events saved)
 RUN_SANITY     <- FALSE  # Script 04: DONE 2026-05-05
 RUN_REF_PARAMS <- FALSE  # Script 05: DONE 2026-05-06
-RUN_FRIEDMAN   <- TRUE   # Script 06: fix data.table→data.frame conversion on load
+RUN_FRIEDMAN   <- FALSE  # Script 06: DONE 2026-05-07
 RUN_CROSSPERIOD <- FALSE # Script 07: DONE 2026-05-06
 RUN_APPENDIX   <- FALSE  # Script 08: DONE 2026-05-06
-RUN_CDD_COMP   <- TRUE   # Script 09: RERUN after script 03 regenerates cfg files with country
+RUN_CDD_COMP   <- FALSE  # Script 09: DONE 2026-05-07
 ```
 
 ```{r step1-spi}
