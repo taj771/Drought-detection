@@ -49,7 +49,7 @@ P_THRESHOLD  <- 0.05
 # (produced by script 03). drought_annual_summary_ref.rds is the aggregated
 # version (no event_year) — Friedman needs per-year rows so use the yearly file.
 message("Loading reference period yearly summary...")
-annual_ref_raw <- readRDS(file.path(VOLUME_PATH, "drought_summary_yearly_ref.rds"))
+annual_ref_raw <- as.data.frame(readRDS(file.path(VOLUME_PATH, "drought_summary_yearly_ref.rds")))
 
 # Rename script-03 columns to script-06 expected names
 annual_ref <- annual_ref_raw %>%
@@ -482,7 +482,7 @@ for (ctry in countries) {
 }
 
 strat_friedman  <- if (length(strat_friedman_all)  > 0) do.call(rbind, strat_friedman_all)  else data.frame()
-strat_avg_ranks <- if (length(strat_avg_ranks_all) > 0) do.call(rbind, strat_avg_ranks_all) else data.frame()
+strat_avg_ranks <- if (length(strat_avg_ranks_all) > 0) as.data.frame(do.call(rbind, strat_avg_ranks_all)) else data.frame()
 
 saveRDS(strat_friedman,  file.path(VOLUME_PATH, "analysis1_friedman_stratified.rds"))
 message("Saved: analysis1_friedman_stratified.rds")
@@ -515,7 +515,12 @@ if (nrow(strat_avg_ranks) > 0) {
           filter(country == ctry, characteristic == char_name, threshold == tp[2]) %>%
           select(config_id, r2 = avg_rank)
         joined <- inner_join(r1, r2, by = "config_id")
-        if (nrow(joined) < 3) return(data.frame())
+        if (nrow(joined) < 3) return(data.frame(
+          country = character(0), characteristic = character(0),
+          thr_a = numeric(0), thr_b = numeric(0),
+          spearman_r = numeric(0), n_configs = integer(0),
+          stringsAsFactors = FALSE
+        ))
         data.frame(
           country        = ctry,
           characteristic = char_name,
@@ -533,12 +538,14 @@ if (nrow(strat_avg_ranks) > 0) {
   saveRDS(threshold_robustness, file.path(VOLUME_PATH, "analysis1_threshold_robustness.rds"))
   message("Saved: analysis1_threshold_robustness.rds")
 
-  cat("\n=== Threshold robustness (Spearman r of rank order across WMO thresholds) ===\n")
-  threshold_robustness %>%
-    group_by(country, characteristic) %>%
-    summarise(mean_r = round(mean(spearman_r, na.rm = TRUE), 3), .groups = "drop") %>%
-    arrange(country, characteristic) %>%
-    print(row.names = FALSE)
+  if (nrow(threshold_robustness) > 0) {
+    cat("\n=== Threshold robustness (Spearman r of rank order across WMO thresholds) ===\n")
+    threshold_robustness %>%
+      group_by(country, characteristic) %>%
+      summarise(mean_r = round(mean(spearman_r, na.rm = TRUE), 3), .groups = "drop") %>%
+      arrange(country, characteristic) %>%
+      print(row.names = FALSE)
+  }
 }
 
 
@@ -566,7 +573,7 @@ if (!file.exists(pf_path)) {
   message("  pixel_freq_ref.rds not found — skipping Level 3 (rerun Script 03 first)")
 } else {
 
-  pixel_freq <- readRDS(pf_path)
+  pixel_freq <- as.data.frame(readRDS(pf_path))
   message(sprintf("  pixel_freq_ref: %s rows, %d configs, %d pixels",
                   format(nrow(pixel_freq), big.mark = ","),
                   n_distinct(pixel_freq$config_id),

@@ -595,6 +595,11 @@ message(sprintf("Total events across all configs: %s\n", format(n_total_events, 
 non_null_yearly <- Filter(Negate(is.null), yearly_list)
 rm(yearly_list); gc()
 
+message(sprintf("DEBUG assembly: non_null_yearly=%d, ppc is.null=%s, ppc rows=%s",
+                length(non_null_yearly),
+                is.null(ppc),
+                if (is.null(ppc)) "NA" else as.character(nrow(ppc))))
+
 if (length(non_null_yearly) > 0 && !is.null(ppc)) {
 
   drought_summary_yearly <- rbindlist(non_null_yearly, use.names = TRUE, fill = TRUE)
@@ -633,38 +638,24 @@ if (length(non_null_yearly) > 0 && !is.null(ppc)) {
   rm(non_null_yearly); gc()
 }
 
-# -- Assemble all_drought_events (single rbindlist after summaries freed) -----
-# Summaries done and yearly_list freed. Peak RAM here = ~1.5x total events size.
-message("\nAssembling all_drought_events from cfg_*.rds files...")
-all_events_list <- lapply(chunk_files, function(f) {
-  x <- readRDS(f)
-  if (is.null(x) || nrow(x) == 0L) return(NULL)
-  x
-})
-all_drought_events <- rbindlist(Filter(Negate(is.null), all_events_list),
-                                use.names = TRUE, fill = TRUE)
-rm(all_events_list); gc()
-
-# -- Save outputs -------------------------------------------------------------
+# -- Save summaries FIRST (small, already in RAM) before attempting big rbindlist --
+# Critical: summaries saved before all_drought_events assembly which may OOM.
+# Scripts 06/07/09 only need the summary files — all_drought_events is best-effort.
 message("\n=== Saving outputs ===\n")
-
-saveRDS(all_drought_events, file.path(VOLUME_PATH, "all_drought_events.rds"))
-rm(all_drought_events); gc()
-message("  all_drought_events.rds           — full event list, all configs")
 
 if (nrow(drought_summary_yearly) > 0) {
   saveRDS(drought_summary_yearly,
           file.path(VOLUME_PATH, "drought_summary_yearly_ref.rds"))
   message("  drought_summary_yearly_ref.rds   — yearly summary per country per config (ERA5 reference)")
 }
+rm(drought_summary_yearly); gc()
 
 if (nrow(drought_annual_summary) > 0) {
-  # Named _ref: ERA5 historical period = reference for scripts 06/07 Friedman analysis.
-  # drought_annual_summary_comp.rds will be produced in Phase 3 from CMIP6 runs.
   saveRDS(drought_annual_summary,
           file.path(VOLUME_PATH, "drought_annual_summary_ref.rds"))
   message("  drought_annual_summary_ref.rds   — one row per config per country (ERA5 reference)")
 }
+rm(drought_annual_summary); gc()
 
 # Pixel-level frequency in reference period — used by Script 06 Level 3 spatial tests.
 non_null_pf <- Filter(Negate(is.null), pixel_freq_list)
@@ -681,6 +672,22 @@ if (length(non_null_pf) > 0) {
 } else {
   message("  pixel_freq_ref.rds               — SKIPPED (no country column in chunks)")
 }
+
+# -- Assemble all_drought_events LAST (largest object, OOM risk) ---------------
+# Summaries already saved above. If this OOMs, critical outputs are safe.
+message("\nAssembling all_drought_events from cfg_*.rds files...")
+all_events_list <- lapply(chunk_files, function(f) {
+  x <- readRDS(f)
+  if (is.null(x) || nrow(x) == 0L) return(NULL)
+  x
+})
+all_drought_events <- rbindlist(Filter(Negate(is.null), all_events_list),
+                                use.names = TRUE, fill = TRUE)
+rm(all_events_list); gc()
+
+saveRDS(all_drought_events, file.path(VOLUME_PATH, "all_drought_events.rds"))
+rm(all_drought_events); gc()
+message("  all_drought_events.rds           — full event list, all configs")
 
 message("\n=== Script 03 complete ===")
 message("Next: Script 07 (sanity checks and visual inspection of detected events)")
