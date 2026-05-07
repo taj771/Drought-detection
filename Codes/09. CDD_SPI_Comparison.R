@@ -44,7 +44,7 @@ REF_START      <- 1973
 REF_END        <- 2002
 P_THRESHOLD    <- 0.05
 
-COUNTRIES <- c("Ethiopia", "Kenya", "Somalia", "South Sudan", "Sudan", "Uganda")
+COUNTRIES <- c("Argentina", "Benin", "Thailand", "Greece", "Mexico", "South Africa")
 
 
 # -- Spark connection ---------------------------------------------------------
@@ -59,63 +59,116 @@ sc <- spark_connect(method = "databricks")
 
 message("\n=== Step 1: ERA5 CDD run-length detection ===")
 
-dd_era5 <- tbl(sc, sql(sprintf(
-  "SELECT x, y, time, year, country, precip FROM %s
-   WHERE country IN (%s)",
-  ERA5_CATALOG,
-  paste(sprintf("'%s'", COUNTRIES), collapse = ", ")
-)))
+# CDD run-length detection via pure SQL window functions.
+# Uses island-gap technique: assign run_id = row_number - cumulative_dry_days_so_far.
+# Rows with same (x, y, country, year, run_id) AND dry_day=1 form one consecutive dry run.
+# This avoids global cumsum shuffle that OOMs in sparklyr dplyr approach.
+cdd_sql <- sprintf(
+  "WITH base AS (
+     SELECT x, y, time, year,
+            country,
+            CASE WHEN precip <= %g THEN 1 ELSE 0 END AS dry_day
+     FROM %s
+     WHERE country IN (%s)
+   ),
+   numbered AS (
+     SELECT x, y, country, year, dry_day,
+            ROW_NUMBER() OVER (
+              PARTITION BY x, y, country, year ORDER BY time
+            ) AS rn,
+            SUM(dry_day) OVER (
+              PARTITION BY x, y, country, year ORDER BY time
+              ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+            ) AS cum_dry
+     FROM base
+   ),
+   tagged AS (
+     SELECT x, y, country, year, dry_day,
+            (rn - cum_dry) AS run_id
+     FROM numbered
+   ),
+   runs AS (
+     SELECT x, y, country, year, run_id,
+            COUNT(*) AS run_len
+     FROM tagged
+     WHERE dry_day = 1
+     GROUP BY x, y, country, year, run_id
+     HAVING COUNT(*) >= %d
+   ),
+   annual AS (
+     SELECT x, y, country, year,
+            SUM(FLOOR(CAST(run_len AS DOUBLE) / %d)) AS cdd_freq
+     FROM runs
+     GROUP BY x, y, country, year
+   ),
+   ref_avg AS (
+     SELECT x, y, country,
+            AVG(cdd_freq)  AS cdd_avg_freq,
+            COUNT(*)       AS cdd_n_years
+     FROM annual
+     WHERE year BETWEEN %d AND %d
+     GROUP BY x, y, country
+   )
+   SELECT x, y, country, cdd_avg_freq, cdd_n_years FROM ref_avg",
+  DRY_THRESHOLD, ERA5_CATALOG,
+  paste(sprintf("'%s'", COUNTRIES), collapse = ", "),
+  CDD_MIN_LENGTH, CDD_MIN_LENGTH,
+  REF_START, REF_END
+)
 
-# Flag dry days
-dd_era5 <- dd_era5 %>%
-  mutate(
-    dry_day   = if_else(precip <= DRY_THRESHOLD, 1L, 0L),
-    group_var = paste(x, y, year, country, sep = "_")
-  )
+cdd_ref_spark <- tbl(sc, sql(cdd_sql)) %>% collect()
+message(sprintf("CDD ref-period pixel rows: %d", nrow(cdd_ref_spark)))
+message(sprintf("CDD ref columns: %s", paste(names(cdd_ref_spark), collapse = ", ")))
 
-# Run-length detection via Spark window functions (mirrors Rmd logic)
-cdd_runs <- dd_era5 %>%
-  group_by(x, y, country) %>%
-  window_order(x, y, country, time) %>%
-  mutate(
-    change = as.integer(
-      group_var != lag(group_var, default = first(group_var)) |
-      dry_day   != lag(dry_day,   default = first(dry_day))
-    )
-  ) %>%
-  group_by(run = cumsum(change), group_var) %>%
-  summarise(
-    count   = n(),
-    dry_day = first_value(dry_day),
-    x       = first_value(x),
-    y       = first_value(y),
-    country = first_value(country),
-    year    = first_value(year),
-    .groups = "drop"
-  ) %>%
-  filter(dry_day == 1L, count >= CDD_MIN_LENGTH)
+# Separate query for full annual series (cdd_era5_annual.rds)
+cdd_annual_sql <- sprintf(
+  "WITH base AS (
+     SELECT x, y, time, year,
+            country,
+            CASE WHEN precip <= %g THEN 1 ELSE 0 END AS dry_day
+     FROM %s
+     WHERE country IN (%s)
+   ),
+   numbered AS (
+     SELECT x, y, country, year, dry_day,
+            ROW_NUMBER() OVER (
+              PARTITION BY x, y, country, year ORDER BY time
+            ) AS rn,
+            SUM(dry_day) OVER (
+              PARTITION BY x, y, country, year ORDER BY time
+              ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+            ) AS cum_dry
+     FROM base
+   ),
+   tagged AS (
+     SELECT x, y, country, year, dry_day,
+            (rn - cum_dry) AS run_id
+     FROM numbered
+   ),
+   runs AS (
+     SELECT x, y, country, year, run_id,
+            COUNT(*) AS run_len
+     FROM tagged
+     WHERE dry_day = 1
+     GROUP BY x, y, country, year, run_id
+     HAVING COUNT(*) >= %d
+   )
+   SELECT x, y, country, year,
+          SUM(FLOOR(CAST(run_len AS DOUBLE) / %d)) AS cdd_freq
+   FROM runs
+   GROUP BY x, y, country, year",
+  DRY_THRESHOLD, ERA5_CATALOG,
+  paste(sprintf("'%s'", COUNTRIES), collapse = ", "),
+  CDD_MIN_LENGTH, CDD_MIN_LENGTH
+)
 
-# Annual CDD event frequency per pixel
-# freq_era5 = number of times each exact run length occurred
-# mult = how many CDD_MIN_LENGTH units fit in that run
-# freq = mult * freq_era5 = effective annual event count
-cdd_annual <- cdd_runs %>%
-  group_by(x, y, country, year, count) %>%
-  summarise(freq_era5 = n(), .groups = "drop") %>%
-  mutate(
-    mult = floor(count / CDD_MIN_LENGTH),
-    freq = mult * freq_era5
-  ) %>%
-  group_by(x, y, country, year) %>%
-  summarise(cdd_freq = sum(freq, na.rm = TRUE), .groups = "drop") %>%
-  collect()
-
-message(sprintf("CDD annual rows: %d", nrow(cdd_annual)))
-saveRDS(cdd_annual, file.path(VOLUME_PATH, "cdd_era5_annual.rds"))
+cdd_annual_spark <- tbl(sc, sql(cdd_annual_sql)) %>% collect()
+message(sprintf("CDD annual rows: %d", nrow(cdd_annual_spark)))
+saveRDS(cdd_annual_spark, file.path(VOLUME_PATH, "cdd_era5_annual.rds"))
 message("Saved: cdd_era5_annual.rds")
 
 spark_disconnect(sc)
-rm(dd_era5, cdd_runs)
+rm(cdd_annual_spark)
 
 
 # =============================================================================
@@ -124,14 +177,9 @@ rm(dd_era5, cdd_runs)
 
 message("\n=== Step 2: Reference period pixel averages ===")
 
-cdd_ref <- cdd_annual %>%
-  filter(year >= REF_START, year <= REF_END) %>%
-  group_by(x, y, country) %>%
-  summarise(
-    cdd_avg_freq  = mean(cdd_freq, na.rm = TRUE),
-    cdd_n_years   = n(),
-    .groups = "drop"
-  )
+# cdd_ref_spark already aggregated to ref period inside Spark (Step 1)
+cdd_ref <- cdd_ref_spark
+rm(cdd_ref_spark)
 
 cat(sprintf("Pixels with CDD data: %d\n", nrow(cdd_ref)))
 saveRDS(cdd_ref, file.path(VOLUME_PATH, "cdd_era5_ref_avg.rds"))
@@ -144,16 +192,66 @@ message("Saved: cdd_era5_ref_avg.rds")
 
 message("\n=== Step 3: Load SPI/SPEI pixel frequency ===")
 
-# pixel_freq_ref.rds: columns — config_id, country, x, y, spi_freq (avg annual events ref period)
-# Produced by Script 03 spatial block
-pixel_freq_path <- file.path(VOLUME_PATH, "pixel_freq_ref.rds")
+# pixel_freq_ref.rds: columns — config_id, country, x, y, ref_n_events
+# Produced by Script 03 spatial block.
+# If missing (Script 03 assembly OOM'd before writing it), reconstruct from
+# all_drought_events.rds — filter to ref period, sum events per pixel × config.
+pixel_freq_path    <- file.path(VOLUME_PATH, "pixel_freq_ref.rds")
+all_events_path    <- file.path(VOLUME_PATH, "all_drought_events.rds")
 
-if (!file.exists(pixel_freq_path)) {
-  stop("pixel_freq_ref.rds not found. Run Script 03 first.")
+tmp_dir <- file.path(VOLUME_PATH, "detection_tmp")
+
+if (file.exists(pixel_freq_path)) {
+  pixel_freq <- readRDS(pixel_freq_path)
+  if (inherits(pixel_freq, "data.table")) pixel_freq <- as.data.frame(pixel_freq)
+  message(sprintf("Loaded pixel_freq_ref.rds — cols: %s | country present: %s",
+                  paste(names(pixel_freq), collapse = ", "),
+                  "country" %in% names(pixel_freq)))
+  # Rebuild if country column missing (stale file from earlier run)
+  if (!"country" %in% names(pixel_freq)) {
+    message("pixel_freq_ref.rds missing country — will rebuild from cfg files")
+    file.remove(pixel_freq_path)
+    pixel_freq <- NULL
+  }
 }
 
-pixel_freq <- readRDS(pixel_freq_path)
-message(sprintf("SPI/SPEI pixel freq rows: %d", nrow(pixel_freq)))
+if (!exists("pixel_freq") || is.null(pixel_freq)) {
+  cfg_files <- list.files(tmp_dir, pattern = "^cfg_.*\\.rds$", full.names = TRUE)
+  if (length(cfg_files) == 0) {
+    stop("No cfg_*.rds files in detection_tmp/. Run Script 03 first.")
+  }
+  message(sprintf("Rebuilding pixel_freq_ref from %d cfg files...", length(cfg_files)))
+  library(data.table)
+  pf_list <- vector("list", length(cfg_files))
+  for (i in seq_along(cfg_files)) {
+    chunk <- readRDS(cfg_files[[i]])
+    if (is.null(chunk) || nrow(chunk) == 0) next
+    if (!"country" %in% names(chunk)) next
+    dt <- as.data.table(chunk)
+    if (!"start_year" %in% names(dt) && "start_date" %in% names(dt)) {
+      dt[, start_year := as.integer(format(as.Date(start_date), "%Y"))]
+    }
+    if (!"start_year" %in% names(dt)) next
+    pf_list[[i]] <- dt[
+      start_year >= REF_START & start_year <= REF_END,
+      .(ref_n_events = .N),
+      by = .(config_id, country, x, y)
+    ]
+    rm(chunk, dt)
+  }
+  non_null <- Filter(Negate(is.null), pf_list)
+  rm(pf_list); gc()
+  if (length(non_null) == 0) stop("No ref-period events found in cfg files.")
+  pixel_freq <- as.data.frame(rbindlist(non_null, use.names = TRUE, fill = TRUE))
+  rm(non_null); gc()
+  message(sprintf("Rebuilt pixel_freq — %s rows, cols: %s",
+                  format(nrow(pixel_freq), big.mark = ","),
+                  paste(names(pixel_freq), collapse = ", ")))
+  saveRDS(pixel_freq, pixel_freq_path)
+  message("Saved: pixel_freq_ref.rds")
+}
+
+message(sprintf("SPI/SPEI pixel freq rows: %s", format(nrow(pixel_freq), big.mark = ",")))
 message(sprintf("Configs: %d", length(unique(pixel_freq$config_id))))
 
 
@@ -166,15 +264,21 @@ message("\n=== Step 4: Spearman r — CDD vs SPI/SPEI frequency ===")
 configs     <- unique(pixel_freq$config_id)
 countries   <- intersect(COUNTRIES, unique(cdd_ref$country))
 
+# Round x/y to 6 d.p. — Spark collect() and data.table RDS encode same grid
+# value differently at 10th+ decimal place → inner_join misses all pixels
+cdd_ref    <- cdd_ref    %>% mutate(x = round(x, 6), y = round(y, 6))
+pixel_freq <- pixel_freq %>% mutate(x = round(x, 6), y = round(y, 6))
+
 spearman_results <- map_dfr(countries, function(ctry) {
 
   cdd_ctry  <- cdd_ref %>% filter(country == ctry)
 
   map_dfr(configs, function(cfg) {
 
+    freq_col <- if ("spi_freq" %in% names(pixel_freq)) "spi_freq" else "ref_n_events"
     spi_ctry <- pixel_freq %>%
       filter(config_id == cfg, country == ctry) %>%
-      select(x, y, spi_freq)
+      select(x, y, spi_freq = all_of(freq_col))
 
     joined <- inner_join(cdd_ctry, spi_ctry, by = c("x", "y"))
 

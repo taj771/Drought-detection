@@ -21,16 +21,16 @@ message("SPEI available on cluster.")
 ```
 
 ```{r run-flags}
-RUN_SPI        <- FALSE  # Script 01: SPI calculation — DONE with country fix 2026-05-04
-RUN_SPEI_T     <- TRUE   # Script 02a: water_balance column added 2026-05-06
-RUN_SPEI_P     <- TRUE   # Script 02b: water_balance column added 2026-05-06
-RUN_DETECTION  <- TRUE   # Script 03: pixel_freq_ref.rds block added 2026-05-06
-RUN_SANITY     <- FALSE  # Script 04: Sanity checks — DONE 2026-05-05
-RUN_REF_PARAMS <- TRUE   # Script 05: log-logistic fix + SPI-12 coverage 2026-05-06
-RUN_FRIEDMAN   <- TRUE   # Script 06: spatial + stratified Friedman added 2026-05-06
-RUN_CROSSPERIOD <- TRUE  # Script 07: tie correction + severity sign fix 2026-05-06
-RUN_APPENDIX   <- TRUE   # Script 08: Severe color fix 2026-05-06
-RUN_CDD_COMP   <- TRUE   # Script 09: new script, first run 2026-05-06
+RUN_SPI        <- FALSE  # Script 01: DONE 2026-05-04
+RUN_SPEI_T     <- FALSE  # Script 02a: DONE 2026-05-06
+RUN_SPEI_P     <- FALSE  # Script 02b: DONE 2026-05-06
+RUN_DETECTION  <- FALSE  # Script 03: DONE 2026-05-07 (summaries + all_drought_events saved)
+RUN_SANITY     <- FALSE  # Script 04: DONE 2026-05-05
+RUN_REF_PARAMS <- FALSE  # Script 05: DONE 2026-05-06
+RUN_FRIEDMAN   <- TRUE   # Script 06: fix data.table→data.frame conversion on load
+RUN_CROSSPERIOD <- FALSE # Script 07: DONE 2026-05-06
+RUN_APPENDIX   <- FALSE  # Script 08: DONE 2026-05-06
+RUN_CDD_COMP   <- TRUE   # Script 09: RERUN after script 03 regenerates cfg files with country
 ```
 
 ```{r step1-spi}
