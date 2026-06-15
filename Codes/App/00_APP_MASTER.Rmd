@@ -1,13 +1,9 @@
-# =============================================================================
-# 00_APP_MASTER.R
-# GWSC Drought ERA5 Monitor — Entry Point
-# =============================================================================
-# Edit parameters below, then run this script (source() or Rscript).
-# Sources scripts 01 → 02 → 03 in order.
-# Output: dated CSV in OUTPUT_DIR.
-# =============================================================================
+---
+title: "GWSC Drought ERA5 Monitor"
+output: html_document
+---
 
-
+```{r parameters}
 # ============================================================
 # USER PARAMETERS — edit this block only
 # ============================================================
@@ -23,11 +19,10 @@ OBS_START  <- 2003                  # Observation period start year
 OBS_END    <- 2023                  # Observation period end year
 
 OUTPUT_DIR <- "/Volumes/projects/gwsc_drought/drought_outputs/app_outputs"
+```
 
-# ============================================================
-# INTERNAL — do not edit below this line
-# ============================================================
-
+```{r setup, include=FALSE}
+# Internal — do not edit
 .prefix <- switch(APP_INDEX,
   "SPI"    = "S",
   "SPEI-T" = "ET",
@@ -46,26 +41,19 @@ APP_CONFIG_ID <- sprintf("%s%d-T-%03d",
   "SPEI-P" = paste0("spei", APP_SCALE, "_pm")
 )
 
-cat("=============================================================\n")
-cat("GWSC Drought ERA5 Monitor\n")
-cat("=============================================================\n")
-cat(sprintf("Country    : %s\n", APP_COUNTRY))
-cat(sprintf("Config     : %s\n", APP_CONFIG_ID))
-cat(sprintf("Index col  : %s\n", .index_col))
-cat(sprintf("Ref period : %d-%d\n", REF_START, REF_END))
-cat(sprintf("Obs period : %d-%d\n", OBS_START, OBS_END))
-cat("=============================================================\n\n")
+cat(sprintf("Config: %s | Country: %s | Ref: %d-%d | Obs: %d-%d\n",
+            APP_CONFIG_ID, APP_COUNTRY, REF_START, REF_END, OBS_START, OBS_END))
+```
 
-script_dir <- dirname(sys.frame(1)$ofile)
-if (is.null(script_dir) || script_dir == "") script_dir <- "Codes/App"
-
-cat("--- Step 1: Index calculation ---\n")
+```{r index-calculation}
+script_dir <- "/Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes/App"
 source(file.path(script_dir, "01_APP_Index_Calculation.R"))
+```
 
-cat("\n--- Step 2: Drought detection ---\n")
+```{r detection}
 source(file.path(script_dir, "02_APP_Detection.R"))
+```
 
-cat("\n--- Step 3: Output ---\n")
+```{r output}
 source(file.path(script_dir, "03_APP_Output.R"))
-
-cat("\n=== Pipeline complete ===\n")
+```

@@ -60,5 +60,5 @@ resources:
         - task_key: run_app
           existing_cluster_id: 0123-211315-fp4hw1e8
           notebook_task:
-            notebook_path: /Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes/App/00_APP_MASTER.R
+            notebook_path: /Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes/App/00_APP_MASTER
             source: WORKSPACE
