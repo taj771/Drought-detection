@@ -36,7 +36,6 @@ global <- tbl(sc, in_catalog("era5-daily-data", "silver_dev",
   collect()
 
 result <- rbind(p1, global)
-print(result)
 
 # Also check Sri Lanka in global
 lk <- tbl(sc, in_catalog("era5-daily-data", "silver_dev",
@@ -45,14 +44,20 @@ lk <- tbl(sc, in_catalog("era5-daily-data", "silver_dev",
   summarise(
     source     = "global_lanka",
     n_rows     = n(),
-    avg_precip = mean(sum_tp_mm, na.rm = TRUE),
-    min_date   = min(time),
-    max_date   = max(time)
+    avg_precip = mean(sum_tp_mm, na.rm = TRUE)
   ) %>%
   collect()
 
+all_results <- list(argentina_compare = result, sri_lanka_check = lk)
+
+out_path <- "/Volumes/projects/gwsc_drought/drought_outputs/diag_table_compare.rds"
+saveRDS(all_results, out_path)
+
+cat("Argentina comparison:\n")
+print(result)
 cat("\nSri Lanka check:\n")
 print(lk)
+cat(sprintf("\nResults saved to: %s\n", out_path))
 
 spark_disconnect(sc)
 ```
