@@ -47,10 +47,11 @@ boundary <- st_transform(boundary, crs = 4326)
 
 # Derive bbox from shapefile for initial Spark pre-filter (fast partition pruning)
 .bb       <- st_bbox(boundary)
-.lat_min  <- floor(.bb["ymin"]   * 4) / 4  - 0.25  # expand 0.25 deg margin
-.lat_max  <- ceiling(.bb["ymax"] * 4) / 4  + 0.25
-.lon_min  <- floor(.bb["xmin"]   * 4) / 4  - 0.25
-.lon_max  <- ceiling(.bb["xmax"] * 4) / 4  + 0.25
+# unname() strips bbox name attributes — prevents sparklyr injecting "AS ymin" etc.
+.lat_min  <- unname(floor(.bb["ymin"]   * 4) / 4  - 0.25)
+.lat_max  <- unname(ceiling(.bb["ymax"] * 4) / 4  + 0.25)
+.lon_min  <- unname(floor(.bb["xmin"]   * 4) / 4  - 0.25)
+.lon_max  <- unname(ceiling(.bb["xmax"] * 4) / 4  + 0.25)
 cat(sprintf("Shapefile bbox (with margin): lat [%.2f, %.2f], lon [%.2f, %.2f]\n",
             .lat_min, .lat_max, .lon_min, .lon_max))
 
