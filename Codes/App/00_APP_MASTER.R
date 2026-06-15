@@ -1,0 +1,71 @@
+# =============================================================================
+# 00_APP_MASTER.R
+# GWSC Drought ERA5 Monitor — Entry Point
+# =============================================================================
+# Edit parameters below, then run this script (source() or Rscript).
+# Sources scripts 01 → 02 → 03 in order.
+# Output: dated CSV in OUTPUT_DIR.
+# =============================================================================
+
+
+# ============================================================
+# USER PARAMETERS — edit this block only
+# ============================================================
+
+APP_COUNTRY   <- "Sri Lanka"        # Country name matching ERA5 catalog `country` column
+APP_INDEX     <- "SPI"              # "SPI" | "SPEI-T" | "SPEI-P"
+APP_SCALE     <- 6                  # Accumulation period: 3 | 6 | 12
+APP_THRESHOLD <- -0.5               # Onset threshold: -0.5 | -1.0 | -1.5
+
+REF_START  <- 1973                  # Reference period start year
+REF_END    <- 2002                  # Reference period end year
+OBS_START  <- 2003                  # Observation period start year
+OBS_END    <- 2023                  # Observation period end year
+
+OUTPUT_DIR <- "/Volumes/projects/gwsc_drought/drought_outputs/app_outputs"
+
+# ============================================================
+# INTERNAL — do not edit below this line
+# ============================================================
+
+.prefix <- switch(APP_INDEX,
+  "SPI"    = "S",
+  "SPEI-T" = "ET",
+  "SPEI-P" = "EP",
+  stop(sprintf("Unknown APP_INDEX '%s'. Must be SPI, SPEI-T, or SPEI-P.", APP_INDEX))
+)
+
+APP_CONFIG_ID <- sprintf("%s%d-T-%03d",
+                         .prefix,
+                         APP_SCALE,
+                         round(abs(APP_THRESHOLD) * 100))
+
+.index_col <- switch(APP_INDEX,
+  "SPI"    = paste0("spi",  APP_SCALE),
+  "SPEI-T" = paste0("spei", APP_SCALE),
+  "SPEI-P" = paste0("spei", APP_SCALE, "_pm")
+)
+
+cat("=============================================================\n")
+cat("GWSC Drought ERA5 Monitor\n")
+cat("=============================================================\n")
+cat(sprintf("Country    : %s\n", APP_COUNTRY))
+cat(sprintf("Config     : %s\n", APP_CONFIG_ID))
+cat(sprintf("Index col  : %s\n", .index_col))
+cat(sprintf("Ref period : %d-%d\n", REF_START, REF_END))
+cat(sprintf("Obs period : %d-%d\n", OBS_START, OBS_END))
+cat("=============================================================\n\n")
+
+script_dir <- dirname(sys.frame(1)$ofile)
+if (is.null(script_dir) || script_dir == "") script_dir <- "Codes/App"
+
+cat("--- Step 1: Index calculation ---\n")
+source(file.path(script_dir, "01_APP_Index_Calculation.R"))
+
+cat("\n--- Step 2: Drought detection ---\n")
+source(file.path(script_dir, "02_APP_Detection.R"))
+
+cat("\n--- Step 3: Output ---\n")
+source(file.path(script_dir, "03_APP_Output.R"))
+
+cat("\n=== Pipeline complete ===\n")

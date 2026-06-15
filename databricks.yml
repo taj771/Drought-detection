@@ -6,20 +6,27 @@ bundle:
 
 sync:
   include:
-    - "Codes/**"
-    - "*.yml"
+    - "Codes/App/**"
+    - "Codes/00. MASTER_RUN_databricks.Rmd"
+    - "Codes/01. SPI_Calculation.R"
+    - "Codes/02a. SPEI_Calculation_Thornthwaite.R"
+    - "Codes/02b. SPEI_Calculation_Penman.R"
+    - "Codes/03. Drought_Detection.R"
+    - "Codes/04. Sanity_Checks.R"
+    - "Codes/05. Reference_Period_Params.R"
+    - "Codes/06. Analysis1_Friedman.R"
+    - "Codes/07. Analysis2_CrossPeriod.R"
+    - "Codes/08. AppendixA1_Figure.R"
+    - "Codes/09. CDD_SPI_Comparison.R"
+    - "Codes/PET_data_prep/**"
+    - "databricks.yml"
   exclude:
-    - ".vscode/**"
-    - ".databricks/**"
+    - ".Rproj.user/**"
+    - ".Rproj.user/"
+    - "**/.Rproj.user/**"
+    - "Drought Calculation*/**"
     - "*_files/**"
-    - "*.html"
-    - "*.pdf"
-    - "*.docx"
-    - "*.tex"
-    - "*.png"
-    - "*.jpg"
-    - "*.rds"
-    - "Data/**"
+    - "**/*_files/**"
     - "typings/**"
 
 targets:
@@ -28,6 +35,7 @@ targets:
     workspace:
       host: https://dbc-9c907c32-f434.cloud.databricks.com
       root_path: ~/Drought-indices
+      profile: DEFAULT
 
   ## Optionally, there could be 'staging' or 'prod' targets here.
   #
@@ -44,4 +52,13 @@ resources:
           existing_cluster_id: 0123-211315-fp4hw1e8
           notebook_task:
             notebook_path: /Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes/00. MASTER_RUN_databricks
+            source: WORKSPACE
+
+    drought_era5_monitor:
+      name: "GWSC Drought ERA5 Monitor"
+      tasks:
+        - task_key: run_app
+          existing_cluster_id: 0123-211315-fp4hw1e8
+          notebook_task:
+            notebook_path: /Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes/App/00_APP_MASTER.R
             source: WORKSPACE
