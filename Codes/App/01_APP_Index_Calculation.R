@@ -37,8 +37,12 @@ USE_SPARK_APPLY <- FALSE
 sc <- spark_connect(method = "databricks")
 
 
-# -- ERA5 data source ---------------------------------------------------------
-era5 <- tbl(sc, in_catalog("projects", "xx_drought_index", "drought_index_dailysummary"))
+# -- ERA5 data source (global silver — monthly pre-aggregated, 0.25 deg, 1950-2024) --
+# Column mapping vs Phase 1 table:
+#   longitude -> x  |  latitude -> y  |  sum_tp_mm -> monthly_precip
+#   mean_t2m_c -> mean_temp_monthly   |  year/month extracted from time column
+era5 <- tbl(sc, in_catalog("era5-daily-data", "silver_dev",
+  "aer_era5_silver_approximate_1950_to_present_dev_interpolation_res5"))
 
 
 # -- SPEI-Penman: check PET files exist before pulling data -------------------
@@ -56,26 +60,31 @@ if (APP_INDEX == "SPEI-P") {
 }
 
 
-# -- Daily -> monthly aggregation in Spark ------------------------------------
-# Aggregation always stays in Spark regardless of USE_SPARK_APPLY.
-# Only the index fitting step differs between the two paths.
+# -- Pull monthly data from global silver -------------------------------------
+# Global silver is already monthly-aggregated — no daily rollup needed.
+# Rename columns to match downstream scripts (x, y, monthly_precip, mean_temp_monthly).
 monthly_spark <- era5 %>%
   filter(
     country %in% !!APP_COUNTRY,
-    year    >= !!REF_START,
-    year    <= !!OBS_END
+    year(time) >= !!REF_START,
+    year(time) <= !!OBS_END
   ) %>%
-  group_by(x, y, country, year, month) %>%
-  summarise(
-    monthly_precip    = sum(precip,     na.rm = TRUE),
-    mean_temp_monthly = mean(mean_temp, na.rm = TRUE),
-    n_days_missing    = sum(as.integer(is.na(precip))),
-    .groups = "drop"
+  select(
+    x              = longitude,
+    y              = latitude,
+    country,
+    time,
+    monthly_precip    = sum_tp_mm,
+    mean_temp_monthly = mean_t2m_c
   ) %>%
-  filter(n_days_missing < 5) %>%
+  mutate(
+    year  = year(time),
+    month = month(time)
+  ) %>%
+  select(-time) %>%
   arrange(x, y, year, month)
 
-cat(sprintf("Monthly aggregation complete for %s (%d–%d).\n",
+cat(sprintf("Monthly data pulled for %s (%d-%d).\n",
             APP_COUNTRY, REF_START, OBS_END))
 
 
@@ -157,7 +166,11 @@ if (USE_SPARK_APPLY) {
   spark_disconnect(sc)
   cat(sprintf("  %s rows, %d unique pixels collected.\n",
               format(nrow(monthly_r), big.mark = ","),
-              length(unique(paste(monthly_r$x, monthly_r$y)))))
+              length(unique(paste(monthly_r$x, monthly_r$y))))
+  )
+  # Ensure year/month are integer (Spark may return numeric)
+  monthly_r$year  <- as.integer(monthly_r$year)
+  monthly_r$month <- as.integer(monthly_r$month)
 
 
   # -- Helper functions -------------------------------------------------------
