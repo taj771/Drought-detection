@@ -1,0 +1,57 @@
+---
+title: "Table Comparison Diagnostic"
+output: html_document
+---
+
+```{r compare}
+library(sparklyr)
+library(dplyr)
+
+sc <- spark_connect(method = "databricks")
+
+# Phase 1 table — Argentina
+p1 <- tbl(sc, in_catalog("projects", "xx_drought_index", "drought_index_dailysummary")) %>%
+  filter(country == "Argentina") %>%
+  summarise(
+    source    = "phase1",
+    n_rows    = n(),
+    avg_precip = mean(precip, na.rm = TRUE),
+    min_date  = min(time),
+    max_date  = max(time)
+  ) %>%
+  collect()
+
+# Global silver table — Argentina
+global <- tbl(sc, in_catalog("era5-daily-data", "silver_dev",
+  "aer_era5_silver_approximate_1950_to_present_dev_interpolation_res5")) %>%
+  filter(country == "Argentina") %>%
+  summarise(
+    source     = "global",
+    n_rows     = n(),
+    avg_precip = mean(sum_tp_mm, na.rm = TRUE),
+    min_date   = min(time),
+    max_date   = max(time)
+  ) %>%
+  collect()
+
+result <- rbind(p1, global)
+print(result)
+
+# Also check Sri Lanka in global
+lk <- tbl(sc, in_catalog("era5-daily-data", "silver_dev",
+  "aer_era5_silver_approximate_1950_to_present_dev_interpolation_res5")) %>%
+  filter(country %like% "%Lanka%") %>%
+  summarise(
+    source     = "global_lanka",
+    n_rows     = n(),
+    avg_precip = mean(sum_tp_mm, na.rm = TRUE),
+    min_date   = min(time),
+    max_date   = max(time)
+  ) %>%
+  collect()
+
+cat("\nSri Lanka check:\n")
+print(lk)
+
+spark_disconnect(sc)
+```
