@@ -80,3 +80,12 @@ resources:
           notebook_task:
             notebook_path: /Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes/App/diag_sri_lanka
             source: WORKSPACE
+
+    drought_diag_cds:
+      name: "GWSC Drought — CDS ERA5 Diagnostic"
+      tasks:
+        - task_key: run_diag_cds
+          existing_cluster_id: 0123-211315-fp4hw1e8
+          notebook_task:
+            notebook_path: /Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes/App/diag_cds_era5
+            source: WORKSPACE

@@ -1,0 +1,37 @@
+---
+title: "CDS ERA5 Table Diagnostic"
+output: html_document
+---
+
+```{r check}
+library(sparklyr)
+library(dplyr)
+library(dbplyr)
+
+sc <- spark_connect(method = "databricks")
+
+cds <- tbl(sc, in_catalog("cds_era5", "silver", "era5_daily"))
+
+# Schema sample
+s <- cds %>% head(3) %>% collect()
+
+# Distinct years for Sri Lanka if country col exists
+cols <- colnames(cds)
+
+# Row count + year range for Sri Lanka
+lk <- cds %>%
+  filter(country %like% "%Lanka%") %>%
+  mutate(yr = year(time)) %>%
+  summarise(n = n(), n_pixels = n_distinct(longitude, latitude),
+            min_yr = min(yr), max_yr = max(yr)) %>%
+  collect()
+
+results <- list(schema = s, cols = cols, sri_lanka = lk)
+saveRDS(results, "/Volumes/projects/gwsc_drought/drought_outputs/diag_cds_era5.rds")
+
+cat("Columns:\n"); print(cols)
+cat("\nSchema:\n"); print(s)
+cat("\nSri Lanka:\n"); print(lk)
+
+spark_disconnect(sc)
+```
