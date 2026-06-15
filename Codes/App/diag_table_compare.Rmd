@@ -6,6 +6,7 @@ output: html_document
 ```{r compare}
 library(sparklyr)
 library(dplyr)
+library(dbplyr)
 
 sc <- spark_connect(method = "databricks")
 
