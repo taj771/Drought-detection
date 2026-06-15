@@ -64,24 +64,21 @@ if (APP_INDEX == "SPEI-P") {
 # Global silver is already monthly-aggregated — no daily rollup needed.
 # Rename columns to match downstream scripts (x, y, monthly_precip, mean_temp_monthly).
 monthly_spark <- era5 %>%
-  filter(
-    country %in% !!APP_COUNTRY,
-    year(time) >= !!REF_START,
-    year(time) <= !!OBS_END
-  ) %>%
-  select(
-    x              = longitude,
-    y              = latitude,
-    country,
-    time,
-    monthly_precip    = sum_tp_mm,
-    mean_temp_monthly = mean_t2m_c
-  ) %>%
+  filter(country == !!APP_COUNTRY) %>%
   mutate(
     year  = year(time),
     month = month(time)
   ) %>%
-  select(-time) %>%
+  filter(year >= !!REF_START, year <= !!OBS_END) %>%
+  select(
+    x              = longitude,
+    y              = latitude,
+    country,
+    year,
+    month,
+    monthly_precip    = sum_tp_mm,
+    mean_temp_monthly = mean_t2m_c
+  ) %>%
   arrange(x, y, year, month)
 
 cat(sprintf("Monthly data pulled for %s (%d-%d).\n",
