@@ -1,0 +1,52 @@
+---
+title: "Sri Lanka Country String Diagnostic"
+output: html_document
+---
+
+```{r check}
+library(sparklyr)
+library(dplyr)
+library(dbplyr)
+
+sc <- spark_connect(method = "databricks")
+
+global_tbl <- tbl(sc, in_catalog("era5-daily-data", "silver_dev",
+  "aer_era5_silver_approximate_1950_to_present_dev_interpolation_res5"))
+
+# Get exact country string
+lk_countries <- global_tbl %>%
+  filter(country %like% "%Lanka%") %>%
+  select(country) %>%
+  distinct() %>%
+  collect()
+
+# Get sample rows with year/month from time
+lk_sample <- global_tbl %>%
+  filter(country %like% "%Lanka%") %>%
+  mutate(yr = year(time), mo = month(time)) %>%
+  filter(yr >= 1973, yr <= 1973) %>%
+  select(longitude, latitude, country, time, yr, mo, sum_tp_mm, mean_t2m_c) %>%
+  head(5) %>%
+  collect()
+
+# Row count for app time range
+lk_rows <- global_tbl %>%
+  filter(country %like% "%Lanka%",
+         year(time) >= 1973,
+         year(time) <= 2023) %>%
+  summarise(n = n(), n_pixels = n_distinct(longitude, latitude)) %>%
+  collect()
+
+results <- list(
+  exact_country_string = lk_countries,
+  sample_rows = lk_sample,
+  row_count_1973_2023 = lk_rows
+)
+saveRDS(results, "/Volumes/projects/gwsc_drought/drought_outputs/diag_sri_lanka.rds")
+
+cat("Exact country string:\n"); print(lk_countries)
+cat("\nSample rows:\n"); print(lk_sample)
+cat("\nRow count 1973-2023:\n"); print(lk_rows)
+
+spark_disconnect(sc)
+```
