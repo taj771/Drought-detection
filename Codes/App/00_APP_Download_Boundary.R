@@ -6,7 +6,7 @@
 # APP_SHAPEFILE_PATH for use by 01_APP_Index_Calculation.R.
 #
 # Shapefiles must be pre-uploaded to Volume before running pipeline:
-#   /Volumes/.../app_outputs/shapefiles/<Country_Name>/boundary.shp
+#   /Volumes/.../app_outputs/shapefiles/<Country_Name>/boundary.gpkg
 #
 # To add a new country:
 #   1. Locally: ne_countries(country="<Name>", returnclass="sf") → st_write(...)
@@ -23,11 +23,11 @@
 #   OUTPUT_DIR  — base output directory on Volume
 #
 # Produces in environment:
-#   APP_SHAPEFILE_PATH — full path to boundary.shp on Volume
+#   APP_SHAPEFILE_PATH — full path to boundary.gpkg on Volume
 # =============================================================================
 
 .country_slug      <- gsub(" ", "_", APP_COUNTRY)
-APP_SHAPEFILE_PATH <- file.path(OUTPUT_DIR, "shapefiles", .country_slug, "boundary.shp")
+APP_SHAPEFILE_PATH <- file.path(OUTPUT_DIR, "shapefiles", .country_slug, "boundary.gpkg")
 
 if (!file.exists(APP_SHAPEFILE_PATH)) {
   stop(sprintf(paste0(
@@ -35,7 +35,7 @@ if (!file.exists(APP_SHAPEFILE_PATH)) {
     "Upload boundary shapefile to Volume before running pipeline.\n",
     "Steps:\n",
     "  1. Locally: library(rnaturalearth); b <- ne_countries(country='%s', returnclass='sf')\n",
-    "              st_write(b, 'boundary.shp')\n",
+    "              st_write(b, 'boundary.gpkg')\n",
     "  2. databricks fs cp boundary.* dbfs:/Volumes/.../app_outputs/shapefiles/%s/ --overwrite"
   ), APP_SHAPEFILE_PATH, APP_COUNTRY, .country_slug))
 }
