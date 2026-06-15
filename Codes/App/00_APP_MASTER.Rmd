@@ -48,10 +48,15 @@ cat(sprintf("Config: %s | Country: %s | Ref: %d-%d | Obs: %d-%d\n",
 ```{r index-calculation}
 script_dir <- "/Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes/App"
 source(file.path(script_dir, "01_APP_Index_Calculation.R"))
+cat(sprintf("index_monthly rows: %d | pixels: %d\n",
+            nrow(index_monthly),
+            length(unique(paste(index_monthly$x, index_monthly$y)))))
 ```
 
 ```{r detection}
 source(file.path(script_dir, "02_APP_Detection.R"))
+cat(sprintf("events_ref rows: %d | events_obs rows: %d\n",
+            nrow(events_ref), nrow(events_obs)))
 ```
 
 ```{r output}
