@@ -10,54 +10,78 @@ library(dbplyr)
 
 sc <- spark_connect(method = "databricks")
 
-# Phase 1 table — Argentina
-p1 <- tbl(sc, in_catalog("projects", "xx_drought_index", "drought_index_dailysummary")) %>%
+p1_tbl <- tbl(sc, in_catalog("projects", "xx_drought_index", "drought_index_dailysummary"))
+global_tbl <- tbl(sc, in_catalog("era5-daily-data", "silver_dev",
+  "aer_era5_silver_approximate_1950_to_present_dev_interpolation_res5"))
+
+# Argentina: row counts + date range + avg precip
+p1_arg <- p1_tbl %>%
   filter(country == "Argentina") %>%
   summarise(
-    source    = "phase1",
-    n_rows    = n(),
+    source     = "phase1",
+    n_rows     = n(),
+    n_pixels   = n_distinct(x, y),
     avg_precip = mean(precip, na.rm = TRUE),
-    min_date  = min(time),
-    max_date  = max(time)
+    min_year   = min(year),
+    max_year   = max(year),
+    x_min      = min(x),
+    x_max      = max(x),
+    y_min      = min(y),
+    y_max      = max(y)
   ) %>%
   collect()
 
-# Global silver table — Argentina
-global <- tbl(sc, in_catalog("era5-daily-data", "silver_dev",
-  "aer_era5_silver_approximate_1950_to_present_dev_interpolation_res5")) %>%
+global_arg <- global_tbl %>%
   filter(country == "Argentina") %>%
   summarise(
     source     = "global",
     n_rows     = n(),
+    n_pixels   = n_distinct(longitude, latitude),
     avg_precip = mean(sum_tp_mm, na.rm = TRUE),
-    min_date   = min(time),
-    max_date   = max(time)
+    min_year   = min(year(time)),
+    max_year   = max(year(time)),
+    x_min      = min(longitude),
+    x_max      = max(longitude),
+    y_min      = min(latitude),
+    y_max      = max(latitude)
   ) %>%
   collect()
 
-result <- rbind(p1, global)
+# Sample pixel spacing to infer resolution
+p1_xvals <- p1_tbl %>%
+  filter(country == "Argentina") %>%
+  select(x) %>% distinct() %>% arrange(x) %>% head(5) %>% collect()
 
-# Also check Sri Lanka in global
-lk <- tbl(sc, in_catalog("era5-daily-data", "silver_dev",
-  "aer_era5_silver_approximate_1950_to_present_dev_interpolation_res5")) %>%
+global_xvals <- global_tbl %>%
+  filter(country == "Argentina") %>%
+  select(longitude) %>% distinct() %>% arrange(longitude) %>% head(5) %>% collect()
+
+# Sri Lanka existence check
+lk <- global_tbl %>%
   filter(country %like% "%Lanka%") %>%
   summarise(
     source     = "global_lanka",
     n_rows     = n(),
+    n_pixels   = n_distinct(longitude, latitude),
     avg_precip = mean(sum_tp_mm, na.rm = TRUE)
   ) %>%
   collect()
 
-all_results <- list(argentina_compare = result, sri_lanka_check = lk)
+all_results <- list(
+  p1_argentina    = p1_arg,
+  global_argentina = global_arg,
+  p1_x_sample    = p1_xvals,
+  global_x_sample = global_xvals,
+  sri_lanka       = lk
+)
 
-out_path <- "/Volumes/projects/gwsc_drought/drought_outputs/diag_table_compare.rds"
-saveRDS(all_results, out_path)
+saveRDS(all_results, "/Volumes/projects/gwsc_drought/drought_outputs/diag_table_compare.rds")
 
-cat("Argentina comparison:\n")
-print(result)
-cat("\nSri Lanka check:\n")
-print(lk)
-cat(sprintf("\nResults saved to: %s\n", out_path))
+cat("=== Phase 1 Argentina ===\n"); print(p1_arg)
+cat("\n=== Global silver Argentina ===\n"); print(global_arg)
+cat("\n=== Phase 1 x sample (resolution probe) ===\n"); print(p1_xvals)
+cat("\n=== Global x sample (resolution probe) ===\n"); print(global_xvals)
+cat("\n=== Sri Lanka ===\n"); print(lk)
 
 spark_disconnect(sc)
 ```
