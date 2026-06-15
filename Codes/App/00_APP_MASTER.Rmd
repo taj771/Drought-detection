@@ -45,8 +45,14 @@ cat(sprintf("Config: %s | Country: %s | Ref: %d-%d | Obs: %d-%d\n",
             APP_CONFIG_ID, APP_COUNTRY, REF_START, REF_END, OBS_START, OBS_END))
 ```
 
-```{r index-calculation}
+```{r boundary}
 script_dir <- "/Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes/App"
+# Downloads country boundary from Natural Earth and sets APP_SHAPEFILE_PATH.
+# GWSC pipeline integration: replace with carto shapefile path, skip this source().
+source(file.path(script_dir, "00_APP_Download_Boundary.R"))
+```
+
+```{r index-calculation}
 source(file.path(script_dir, "01_APP_Index_Calculation.R"))
 .idx_rows <- nrow(index_monthly)
 .idx_pixels <- length(unique(paste(index_monthly$x, index_monthly$y)))

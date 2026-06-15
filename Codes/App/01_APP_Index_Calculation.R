@@ -26,6 +26,7 @@
 library(sparklyr)
 library(dplyr)
 library(dbplyr)
+library(sf)
 library(SPEI)
 
 # Switch: set TRUE to test spark_apply distributed path (data eng team suggestion)
@@ -37,12 +38,27 @@ USE_SPARK_APPLY <- FALSE
 sc <- spark_connect(method = "databricks")
 
 
-# -- ERA5 data source (global silver — monthly pre-aggregated, 0.25 deg, 1950-2024) --
-# Column mapping vs Phase 1 table:
-#   longitude -> x  |  latitude -> y  |  sum_tp_mm -> monthly_precip
-#   mean_t2m_c -> mean_temp_monthly   |  year/month extracted from time column
-era5 <- tbl(sc, in_catalog("era5-daily-data", "silver_dev",
-  "aer_era5_silver_approximate_1950_to_present_dev_interpolation_res5"))
+# -- Load country boundary shapefile ------------------------------------------
+# APP_SHAPEFILE_PATH set by 00_APP_Download_Boundary.R.
+# When integrating into GWSC pipeline: set APP_SHAPEFILE_PATH to carto
+# shapefile path on Volume and skip 00_APP_Download_Boundary.R entirely.
+boundary <- st_read(APP_SHAPEFILE_PATH, quiet = TRUE)
+boundary <- st_transform(boundary, crs = 4326)
+
+# Derive bbox from shapefile for initial Spark pre-filter (fast partition pruning)
+.bb       <- st_bbox(boundary)
+.lat_min  <- floor(.bb["ymin"]   * 4) / 4  - 0.25  # expand 0.25 deg margin
+.lat_max  <- ceiling(.bb["ymax"] * 4) / 4  + 0.25
+.lon_min  <- floor(.bb["xmin"]   * 4) / 4  - 0.25
+.lon_max  <- ceiling(.bb["xmax"] * 4) / 4  + 0.25
+cat(sprintf("Shapefile bbox (with margin): lat [%.2f, %.2f], lon [%.2f, %.2f]\n",
+            .lat_min, .lat_max, .lon_min, .lon_max))
+
+
+# -- ERA5 source: same table as GWSC product pipeline ------------------------
+# era5-daily-data.silver_staging.era5_daily_nn: daily, 0.25 deg, global,
+# 1950-present. Columns: latitude, longitude, sum_tp_mm, mean_t2m_c, year, month.
+era5 <- tbl(sc, in_catalog("era5-daily-data", "silver_staging", "era5_daily_nn"))
 
 
 # -- SPEI-Penman: check PET files exist before pulling data -------------------
@@ -52,7 +68,7 @@ if (APP_INDEX == "SPEI-P") {
   pet_files <- list.files(pet_dir, pattern = "\\.nc$", full.names = TRUE)
   if (length(pet_files) == 0) {
     stop(sprintf(
-      "SPEI-P selected but no PET NC files found in:\n  %s\nRun ERA5-Land PET preprocessing first (Scripts 03-05 of Phase 1).",
+      "SPEI-P selected but no PET NC files found in:\n  %s\nRun ERA5-Land PET preprocessing first.",
       pet_dir
     ))
   }
@@ -60,28 +76,28 @@ if (APP_INDEX == "SPEI-P") {
 }
 
 
-# -- Pull monthly data from global silver -------------------------------------
-# Global silver is already monthly-aggregated — no daily rollup needed.
-# Rename columns to match downstream scripts (x, y, monthly_precip, mean_temp_monthly).
+# -- Step 1: bbox pre-filter + daily->monthly aggregation in Spark ------------
+# Bbox filter is fast (Spark partition pruning). Exact polygon clip done in R
+# after collect — same two-step approach as GWSC product pipeline.
 monthly_spark <- era5 %>%
-  filter(country == !!APP_COUNTRY) %>%
-  mutate(
-    year  = year(time),
-    month = month(time)
+  filter(
+    latitude  >= !!.lat_min, latitude  <= !!.lat_max,
+    longitude >= !!.lon_min, longitude <= !!.lon_max,
+    year >= !!REF_START, year <= !!OBS_END
   ) %>%
-  filter(year >= !!REF_START, year <= !!OBS_END) %>%
-  select(
-    x              = longitude,
-    y              = latitude,
-    country,
-    year,
-    month,
-    monthly_precip    = sum_tp_mm,
-    mean_temp_monthly = mean_t2m_c
+  group_by(longitude, latitude, year, month) %>%
+  summarise(
+    monthly_precip    = sum(sum_tp_mm,   na.rm = TRUE),
+    mean_temp_monthly = mean(mean_t2m_c, na.rm = TRUE),
+    n_days_missing    = sum(as.integer(is.na(sum_tp_mm))),
+    .groups = "drop"
   ) %>%
+  filter(n_days_missing < 5) %>%
+  select(x = longitude, y = latitude, year, month,
+         monthly_precip, mean_temp_monthly) %>%
   arrange(x, y, year, month)
 
-cat(sprintf("Monthly data pulled for %s (%d-%d).\n",
+cat(sprintf("Monthly aggregation complete for %s bbox (%d-%d).\n",
             APP_COUNTRY, REF_START, OBS_END))
 
 
@@ -161,10 +177,28 @@ if (USE_SPARK_APPLY) {
   cat("Using collect-then-R path (default)...\n")
   monthly_r <- monthly_spark %>% collect()
   spark_disconnect(sc)
-  cat(sprintf("  %s rows, %d unique pixels collected.\n",
+  cat(sprintf("  %s rows (bbox), %d unique pixels before polygon clip.\n",
               format(nrow(monthly_r), big.mark = ","),
-              length(unique(paste(monthly_r$x, monthly_r$y))))
+              length(unique(paste(monthly_r$x, monthly_r$y)))))
+
+  # -- Step 2: exact polygon clip (same as GWSC pipeline spatial join) ---------
+  # Convert pixel centroids to sf points, intersect with country boundary.
+  pixels_sf <- st_as_sf(
+    unique(monthly_r[, c("x", "y")]),
+    coords = c("x", "y"), crs = 4326
   )
+  inside <- st_intersects(pixels_sf, boundary, sparse = FALSE)
+  pixels_in <- pixels_sf[rowSums(inside) > 0, ]
+  valid_coords <- st_coordinates(pixels_in)
+  valid_key    <- paste(valid_coords[, 1], valid_coords[, 2])
+
+  monthly_r <- monthly_r[paste(monthly_r$x, monthly_r$y) %in% valid_key, ]
+  monthly_r$country <- APP_COUNTRY
+
+  cat(sprintf("  %s rows after polygon clip, %d pixels inside boundary.\n",
+              format(nrow(monthly_r), big.mark = ","),
+              length(unique(paste(monthly_r$x, monthly_r$y)))))
+
   # Ensure year/month are integer (Spark may return numeric)
   monthly_r$year  <- as.integer(monthly_r$year)
   monthly_r$month <- as.integer(monthly_r$month)
