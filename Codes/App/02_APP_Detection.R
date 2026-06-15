@@ -73,7 +73,7 @@ run_detection <- function(df, period_label, yr_start, yr_end) {
 
   period_data <- df %>%
     filter(year >= yr_start, year <= yr_end) %>%
-    mutate(date = as.Date(paste(year, month, "01", sep = "-"))) %>%
+    mutate(date = as.Date(sprintf("%04d-%02d-01", as.integer(year), as.integer(month)))) %>%
     arrange(x, y, date)
 
   pixels <- unique(period_data[, c("x", "y")])
