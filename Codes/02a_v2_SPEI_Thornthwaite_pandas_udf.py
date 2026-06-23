@@ -139,35 +139,54 @@ def spei_t_udf(df: pd.DataFrame) -> pd.DataFrame:
 
     df = df.sort_values(["year", "month"]).reset_index(drop=True)
     precip = df["monthly_precip"].values.astype(float)
+    temp   = df["mean_temp_monthly"].values.astype(float)
     lat    = float(df["y"].iloc[0])
+    start_year = int(df["year"].iloc[0])
+    n = len(precip)
 
-    def safe_spei(precip_arr, scale, lat_val):
+    # Thornthwaite PET computed once from monthly mean temperature + latitude.
+    # climate_indices.indices.spei() does NOT compute PET internally — it must
+    # be supplied. indices.pet() returns a monthly PET ndarray (mm).
+    def compute_pet():
+        if np.all(np.isnan(temp)):
+            return np.full(n, np.nan)
+        try:
+            t = np.where(np.isnan(temp), 0.0, temp)   # pet() rejects NaNs
+            return indices.pet(temperature_celsius=t,
+                               latitude_degrees=lat,
+                               data_start_year=start_year)
+        except Exception as e:
+            print(f"[pet] failed: {type(e).__name__}: {e}")
+            return np.full(n, np.nan)
+
+    pet = compute_pet()
+
+    def safe_spei(precip_arr, pet_arr, scale):
         min_obs = max(scale * 4, 24)
         valid = precip_arr[~np.isnan(precip_arr)]
-        if len(valid) < min_obs:
-            return np.full(len(precip_arr), np.nan), np.full(len(precip_arr), np.nan)
+        if len(valid) < min_obs or np.all(np.isnan(pet_arr)):
+            return np.full(len(precip_arr), np.nan)
         try:
             result = indices.spei(
                 precips_mm=precip_arr,
-                pet_mm=None,           # Thornthwaite computed internally
+                pet_mm=pet_arr,        # Thornthwaite PET (precomputed above)
                 scale=scale,
                 distribution=indices.Distribution.pearson,
                 periodicity=compute.Periodicity.monthly,
-                data_start_year=int(df["year"].iloc[0]),
-                calibration_year_initial=int(df["year"].iloc[0]),
+                data_start_year=start_year,
+                calibration_year_initial=start_year,
                 calibration_year_final=int(df["year"].iloc[-1]),
-                lat=lat_val
             )
-            spei_vals = np.where(np.isinf(result.spei), np.nan, result.spei)
-            pet_vals  = result.pet if hasattr(result, "pet") else np.full(len(precip_arr), np.nan)
-            return spei_vals, pet_vals
-        except Exception:
-            return np.full(len(precip_arr), np.nan), np.full(len(precip_arr), np.nan)
+            return np.where(np.isinf(result), np.nan, result)
+        except Exception as e:
+            print(f"[spei scale={scale}] failed: {type(e).__name__}: {e}")
+            return np.full(len(precip_arr), np.nan)
 
-    spei1,  pet1  = safe_spei(precip, 1,  lat)
-    spei3,  _     = safe_spei(precip, 3,  lat)
-    spei6,  _     = safe_spei(precip, 6,  lat)
-    spei12, pet12 = safe_spei(precip, 12, lat)
+    spei1  = safe_spei(precip, pet, 1)
+    spei3  = safe_spei(precip, pet, 3)
+    spei6  = safe_spei(precip, pet, 6)
+    spei12 = safe_spei(precip, pet, 12)
+    pet1 = pet12 = pet
 
     # water_balance = precip - PET (use scale-1 PET as representative)
     # climate-indices returns PET alongside SPEI at scale=1
