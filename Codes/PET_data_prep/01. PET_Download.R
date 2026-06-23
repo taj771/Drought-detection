@@ -51,10 +51,12 @@ COUNTRY_NAMES <- c(
   "Benin"
 )
 
-# Analysis Plan Section 1.2 Step 1: full period 1970–2023.
-# Covers reference period (1970–1999) + comparison period (2000–2020) + buffer to 2023.
-# ERA5-Land available from 1950 onward.
-YEARS      <- as.character(1970:2023)
+# Gap-fill download: 1950–1969 only. 1970–2023 already downloaded; this adds
+# the earlier years for temporal consistency with SPI/SPEI-T (era5_daily_nn
+# runs 1950–2026). ERA5-Land available from 1950 onward (CDS, verified).
+# Produces era5land_pet_<country>_1950_1969.nc — kept separate from the
+# existing _1970_2023 files; Script 02b loads + concatenates both.
+YEARS      <- as.character(1950:1969)
 MONTHS     <- sprintf("%02d", 1:12)
 OUTPUT_DIR <- "./data/era5land_pet/"
 

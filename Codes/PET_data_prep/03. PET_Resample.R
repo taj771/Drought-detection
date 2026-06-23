@@ -50,8 +50,9 @@ clipped_dir   <- "./data/era5land_pet/clipped_era5grid/"
 project_folder <- "xx_drought_index"
 catalog_name   <- "projects"
 
-# Year range — used for layer date labelling, must match Script 03
-years <- as.character(1970:2023)
+# Layer date labelling derives the start year from each file's name
+# (era5land_pet_<country>_<startYear>_<endYear>.nc), so files from different
+# eras (e.g. 1950_1969 and 1970_2023) are labelled correctly in one run.
 
 # =============================================================================
 
@@ -138,7 +139,9 @@ resample_nc_to_era5 <- function(nc_path, template) {
   r_mm  <- r_raw * -1000  # metres (negative) → mm/month (positive)
 
   n_layers <- nlyr(r_mm)
-  dates    <- seq(as.Date(paste0(min(years), "-01-01")),
+  # Start year = first 4-digit year in the filename (handles 1950_1969 vs 1970_2023).
+  start_year <- as.integer(sub(".*_(\\d{4})_(\\d{4})\\.nc$", "\\1", fname))
+  dates    <- seq(as.Date(paste0(start_year, "-01-01")),
                   by = "month", length.out = n_layers)
   names(r_mm) <- format(dates, "pet_%Y_%m")
 
