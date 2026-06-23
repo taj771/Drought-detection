@@ -17,6 +17,7 @@ sync:
     - "Codes/02b. SPEI_Calculation_Penman.R"
     - "Codes/02b_v2_SPEI_Penman_pandas_udf.py"
     - "Codes/03_v2_Drought_Detection_pandas_udf.py"
+    - "Codes/05_v2_Reference_Period_Params_pandas_udf.py"
     - "Codes/03. Drought_Detection.R"
     - "Codes/04. Sanity_Checks.R"
     - "Codes/05. Reference_Period_Params.R"
