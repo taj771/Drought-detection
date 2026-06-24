@@ -285,9 +285,18 @@ drought_annual_summary.toPandas().to_parquet(
     f"{VOLUME_PATH}/drought_annual_summary_ref.parquet", index=False)
 pixel_freq_ref.toPandas().to_parquet(
     f"{VOLUME_PATH}/pixel_freq_ref.parquet", index=False)
-events_sdf.toPandas().to_parquet(
-    f"{VOLUME_PATH}/all_drought_events.parquet", index=False)
+events_pd = events_sdf.toPandas()
+events_pd.to_parquet(f"{VOLUME_PATH}/all_drought_events.parquet", index=False)
+
+# Per-config files for Script 04 (sanity checks streams one config at a time
+# to avoid loading the full event table). Mirrors the R detection_tmp/cfg_*.rds
+# layout, as parquet: detection_tmp/cfg_<config_id>.parquet.
+tmp_dir = f"{VOLUME_PATH}/detection_tmp"
+os.makedirs(tmp_dir, exist_ok=True)
+for cid, sub in events_pd.groupby("config_id"):
+    sub.to_parquet(f"{tmp_dir}/cfg_{cid}.parquet", index=False)
+print(f"Wrote {events_pd['config_id'].nunique()} per-config files to detection_tmp/")
 
 print(f"Done. {n_events:,} events, {len(CONFIGS)} configs, countries={COUNTRY_FILTER}")
 print("Outputs: all_drought_events / drought_summary_yearly_ref / "
-      "drought_annual_summary_ref / pixel_freq_ref (.parquet)")
+      "drought_annual_summary_ref / pixel_freq_ref (.parquet) + detection_tmp/cfg_*.parquet")

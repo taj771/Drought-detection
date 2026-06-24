@@ -2,7 +2,7 @@
 # Runner: source one v2 R analysis step + report completion.
 # STEP is read from a notebook widget (set per job task via base_parameters),
 # falling back to a default for manual runs.
-SCRIPT_DIR <- "/Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes"
+SCRIPT_DIR <- "/Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes/v2_pipeline/R"
 
 STEP <- tryCatch(dbutils.widgets.get("STEP"), error = function(e) "")
 if (is.null(STEP) || STEP == "") STEP <- "04. Sanity_Checks.R"

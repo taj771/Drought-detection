@@ -35,10 +35,14 @@
 library(dplyr)
 library(purrr)
 library(tidyr)
+library(arrow)   # read v2 .parquet inputs
 
 
 # -- Configuration ------------------------------------------------------------
-VOLUME_PATH  <- "/Volumes/projects/gwsc_drought/drought_outputs"
+# v2 pipeline writes .parquet to drought_outputs/v2. Caller can override.
+if (!exists("VOLUME_PATH")) {
+  VOLUME_PATH <- "/Volumes/projects/gwsc_drought/drought_outputs/v2"
+}
 REF_START    <- 1973
 REF_END      <- 2002
 P_THRESHOLD  <- 0.05
@@ -49,7 +53,7 @@ P_THRESHOLD  <- 0.05
 # (produced by script 03). drought_annual_summary_ref.rds is the aggregated
 # version (no event_year) — Friedman needs per-year rows so use the yearly file.
 message("Loading reference period yearly summary...")
-annual_ref_raw <- as.data.frame(readRDS(file.path(VOLUME_PATH, "drought_summary_yearly_ref.rds")))
+annual_ref_raw <- as.data.frame(arrow::read_parquet(file.path(VOLUME_PATH, "drought_summary_yearly_ref.parquet")))
 
 # Rename script-03 columns to script-06 expected names
 annual_ref <- annual_ref_raw %>%
@@ -149,20 +153,29 @@ run_friedman_nemenyi <- function(wide_mat, characteristic, calibrated = FALSE) {
 
   avg_ranks <- sort(colMeans(rank_mat, na.rm = TRUE))
 
-  # Friedman statistic with ties correction
-  # Q_raw = [12 / (n*k*(k+1))] * sum(R_j^2) - 3*n*(k+1)
-  # C_ties = sum(t^3 - t) / (n * k * (k^2 - 1))  where t = tie group sizes per row
-  R_j   <- colSums(rank_mat, na.rm = TRUE)
-  Q_raw <- (12 / (n_obs * n_configs * (n_configs + 1))) * sum(R_j^2) -
-            3 * n_obs * (n_configs + 1)
-
-  tie_correction <- mean(apply(wide_mat, 1, function(row) {
-    tbl <- table(row[!is.na(row)])
-    sum(tbl^3 - tbl) / (n_configs * (n_configs^2 - 1))
-  }))
-  Q     <- if (tie_correction < 1) Q_raw / (1 - tie_correction) else Q_raw
+  # Use stats::friedman.test for Q — avoids manual tie correction overflow.
+  # friedman.test requires complete blocks (no NA); impute row medians for
+  # any remaining NAs so the matrix stays complete.
+  wide_imputed <- wide_mat
+  for (i in seq_len(nrow(wide_imputed))) {
+    nas <- is.na(wide_imputed[i, ])
+    if (any(nas)) wide_imputed[i, nas] <- median(wide_imputed[i, !nas], na.rm = TRUE)
+  }
+  ft    <- friedman.test(wide_imputed)
+  Q     <- unname(ft$statistic)
   df    <- n_configs - 1
-  p_val <- pchisq(Q, df = df, lower.tail = FALSE)
+  p_val_chi2 <- unname(ft$p.value)
+
+  R_j <- colSums(rank_mat, na.rm = TRUE)
+
+  # Iman-Davenport F correction (Demsar 2006, Shieh 2025 arXiv:2503.17179)
+  # More powerful than chi2 for k=15; avoids over-conservative p-values.
+  # F = (N-1)*Q / (N*(k-1) - Q),  df1=k-1,  df2=(k-1)*(N-1)
+  F_stat  <- (n_obs - 1) * Q / (n_obs * df - Q)
+  df2     <- df * (n_obs - 1)
+  p_val   <- if (is.finite(F_stat) && F_stat >= 0) {
+    pf(F_stat, df1 = df, df2 = df2, lower.tail = FALSE)
+  } else p_val_chi2
 
   # Kendall's W
   S <- sum((R_j - mean(R_j))^2)
@@ -176,6 +189,8 @@ run_friedman_nemenyi <- function(wide_mat, characteristic, calibrated = FALSE) {
     friedman_Q     = round(Q, 4),
     df             = df,
     p_value        = round(p_val, 6),
+    p_value_chi2   = round(p_val_chi2, 6),
+    F_stat         = round(F_stat, 4),
     kendall_W      = round(W, 4),
     significant    = p_val <= P_THRESHOLD,
     stringsAsFactors = FALSE
@@ -304,128 +319,27 @@ characteristics <- list(
   )
 )
 
-all_friedman    <- list()
-all_nemenyi     <- list()
-all_avg_ranks   <- list()
-all_equiv_groups <- list()
-
-for (ctry in countries) {
-
-  cat(sprintf("\n=== Country: %s ===\n", ctry))
-
-  # D1 fix: Friedman always uses RAW values. Calibration applied only for the
-  # calibrated-reporting pass — never before the rank matrix is built.
-  ctry_raw <- annual_ref %>% filter(country == ctry)
-  ctry_cal <- apply_calibration(ctry_raw)
-
-  for (cal_pass in c("raw", "calibrated")) {
-
-    char_cols <- if (cal_pass == "raw") characteristics$raw else characteristics$cal
-    is_cal    <- cal_pass == "calibrated"
-    ctry_df   <- if (cal_pass == "raw") ctry_raw else ctry_cal
-
-    for (char_name in names(char_cols)) {
-
-      col <- char_cols[char_name]
-      cat(sprintf("  [%s] %s ... ", cal_pass, char_name))
-
-      # Guard: duplicate config/year rows would silently average in pivot_wider.
-      n_dupes <- nrow(ctry_df) -
-        nrow(unique(ctry_df[, c("config_id", "event_year")]))
-      if (n_dupes > 0) {
-        warning(sprintf(
-          "%s [%s] %s: %d duplicate config/year rows — check upstream data",
-          ctry, cal_pass, char_name, n_dupes))
-      }
-
-      # Wide matrix: rows = years, cols = configs
-      wide <- ctry_df %>%
-        select(config_id, event_year, value = all_of(unname(col))) %>%
-        pivot_wider(names_from = config_id, values_from = value,
-                    values_fn = mean) %>%
-        arrange(event_year) %>%
-        select(-event_year)
-
-      result <- tryCatch(
-        run_friedman_nemenyi(wide, char_name, calibrated = is_cal),
-        error = function(e) {
-          cat(sprintf("ERROR: %s\n", e$message))
-          NULL
-        }
-      )
-
-      if (is.null(result)) next
-
-      result$friedman$country   <- ctry
-      result$avg_ranks$country  <- ctry
-      if (nrow(result$nemenyi_pairs) > 0) result$nemenyi_pairs$country <- ctry
-      result$equiv_groups$country      <- ctry
-      result$equiv_groups$characteristic <- char_name
-      result$equiv_groups$calibrated   <- is_cal
-
-      all_friedman[[length(all_friedman) + 1]]     <- result$friedman
-      all_avg_ranks[[length(all_avg_ranks) + 1]]   <- result$avg_ranks
-      if (nrow(result$nemenyi_pairs) > 0)
-        all_nemenyi[[length(all_nemenyi) + 1]]     <- result$nemenyi_pairs
-      all_equiv_groups[[length(all_equiv_groups) + 1]] <- result$equiv_groups
-
-      cat(sprintf("Q=%.2f, p=%.4f, W=%.3f %s\n",
-                  result$friedman$friedman_Q,
-                  result$friedman$p_value,
-                  result$friedman$kendall_W,
-                  ifelse(result$friedman$significant, "*** SIGNIFICANT", "")))
-    }
-  }
-}
+# Flat k=75 Friedman removed — cross-threshold comparison is mathematically
+# confounded (stricter threshold flags fewer events by construction, not climate
+# signal). Replaced by stratified design below (k=15 per threshold stratum).
 
 
 # =============================================================================
-# COMPILE AND SAVE
+# STRATIFIED FRIEDMAN — k=15 per threshold stratum
 # =============================================================================
-
-friedman_results   <- do.call(rbind, all_friedman)
-avg_ranks_all      <- do.call(rbind, all_avg_ranks)
-nemenyi_pairs_all  <- if (length(all_nemenyi) > 0) do.call(rbind, all_nemenyi) else data.frame()
-equiv_groups_all   <- do.call(rbind, all_equiv_groups)
-
-saveRDS(friedman_results,  file.path(VOLUME_PATH, "analysis1_friedman_results.rds"))
-saveRDS(nemenyi_pairs_all, file.path(VOLUME_PATH, "analysis1_nemenyi_pairs.rds"))
-saveRDS(equiv_groups_all,  file.path(VOLUME_PATH, "analysis1_equivalence_groups.rds"))
-saveRDS(avg_ranks_all,     file.path(VOLUME_PATH, "analysis1_avg_ranks.rds"))
-
-message("\n=== Analysis 1 complete ===")
-message("Outputs saved:")
-message("  analysis1_friedman_results.rds")
-message("  analysis1_nemenyi_pairs.rds")
-message("  analysis1_equivalence_groups.rds")
-message("  analysis1_avg_ranks.rds")
-
-# Quick summary table
-cat("\n=== Friedman results summary (raw values) ===\n")
-friedman_results %>%
-  filter(!calibrated) %>%
-  select(country, characteristic, friedman_Q, p_value, kendall_W, significant) %>%
-  arrange(country, characteristic) %>%
-  print(row.names = FALSE)
-
-
-# =============================================================================
-# STRATIFIED FRIEDMAN — k=15 per WMO-standard threshold (D11 fix)
-# =============================================================================
-# Flat k=75 Nemenyi CD ≈ 24.9 — too conservative to detect meaningful pairs.
-# Stratified: one Friedman per threshold (-0.5, -1.0, -1.5) × country × char.
-# k=15 (5 indices × 3 accumulation periods per threshold). CD ≈ 4.8.
-# Thresholds 0.0 and -0.25 excluded — not WMO standard operational thresholds.
-# Separate Spearman rank correlation tests whether config rank order is stable
-# across the three thresholds (threshold robustness check).
+# One Friedman per threshold × country × characteristic.
+# k=15 (5 indices × 3 accumulation periods). Within-stratum only — no
+# cross-threshold comparison (threshold differences are arithmetic, not climate).
+# All 5 thresholds included: 0.0, -0.25, -0.5, -1.0, -1.5.
+# Story team can see 0.0/-0.25 results; robustness check will flag if unstable.
 # Outputs:
 #   analysis1_friedman_stratified.rds  — Friedman results per threshold stratum
 #   analysis1_threshold_robustness.rds — Spearman r of avg rank across thresholds
 # =============================================================================
 
-message("\n=== Stratified Friedman (k=15 per WMO threshold) ===")
+message("\n=== Stratified Friedman (k=15 per threshold stratum) ===")
 
-WMO_THRESHOLDS <- c(-0.5, -1.0, -1.5)
+ALL_THRESHOLDS <- c(0.0, -0.25, -0.5, -1.0, -1.5)
 
 # Parse threshold from config_id suffix: S3-T-050 → -0.50, ET6-T-100 → -1.00
 # Suffix format: last hyphen-separated token, numeric × (-1/100)
@@ -436,7 +350,7 @@ parse_threshold <- function(config_ids) {
 
 annual_ref_thr <- annual_ref %>%
   mutate(threshold = parse_threshold(config_id)) %>%
-  filter(threshold %in% WMO_THRESHOLDS)
+  filter(threshold %in% ALL_THRESHOLDS)
 
 cat(sprintf("Configs after WMO threshold filter: %d\n",
             n_distinct(annual_ref_thr$config_id)))
@@ -445,7 +359,7 @@ strat_friedman_all  <- list()
 strat_avg_ranks_all <- list()
 
 for (ctry in countries) {
-  for (thr in WMO_THRESHOLDS) {
+  for (thr in ALL_THRESHOLDS) {
 
     ctry_thr <- annual_ref_thr %>%
       filter(country == ctry, threshold == thr)
@@ -466,9 +380,16 @@ for (ctry in countries) {
 
       result <- tryCatch(
         run_friedman_nemenyi(wide, char_name, calibrated = FALSE),
-        error = function(e) NULL
+        error = function(e) {
+          cat(sprintf("    ERROR [%s / thr=%.2f / %s]: %s\n", ctry, thr, char_name, e$message))
+          NULL
+        }
       )
-      if (is.null(result)) next
+      if (is.null(result)) {
+        cat(sprintf("    SKIP [%s / thr=%.2f / %s]: NULL result (n_obs=%d, n_cfg=%d)\n",
+                    ctry, thr, char_name, nrow(wide), ncol(wide)))
+        next
+      }
 
       result$friedman$country   <- ctry
       result$friedman$threshold <- thr
@@ -481,10 +402,22 @@ for (ctry in countries) {
   }
 }
 
+cat(sprintf("\nStratified loop complete: %d friedman results, %d avg_rank blocks\n",
+            length(strat_friedman_all), length(strat_avg_ranks_all)))
+
 strat_friedman  <- if (length(strat_friedman_all)  > 0) do.call(rbind, strat_friedman_all)  else data.frame()
-strat_avg_ranks <- if (length(strat_avg_ranks_all) > 0) as.data.frame(do.call(rbind, strat_avg_ranks_all)) else data.frame()
+strat_avg_ranks <- if (length(strat_avg_ranks_all) > 0) {
+  df <- as.data.frame(do.call(rbind, strat_avg_ranks_all))
+  df$threshold  <- as.numeric(df$threshold)
+  df$avg_rank   <- as.numeric(df$avg_rank)
+  df$config_id  <- as.character(df$config_id)
+  df$country    <- as.character(df$country)
+  df
+} else data.frame()
 
 saveRDS(strat_friedman,  file.path(VOLUME_PATH, "analysis1_friedman_stratified.rds"))
+saveRDS(strat_avg_ranks, file.path(VOLUME_PATH, "analysis1_strat_avg_ranks.rds"))
+message(sprintf("strat_avg_ranks: %d rows, cols: %s", nrow(strat_avg_ranks), paste(names(strat_avg_ranks), collapse=", ")))
 message("Saved: analysis1_friedman_stratified.rds")
 
 # Quick stratified summary
@@ -503,18 +436,24 @@ if (nrow(strat_friedman) > 0) {
 
 if (nrow(strat_avg_ranks) > 0) {
 
-  thr_pairs <- combn(WMO_THRESHOLDS, 2, simplify = FALSE)
+  thr_pairs <- combn(ALL_THRESHOLDS, 2, simplify = FALSE)
+
+  # config_id encodes threshold in suffix: ET6-T-050, ET6-T-100, ET6-T-150
+  # Strip last hyphen-segment to get base_id: ET6-T, S3-T, EP12-T, ET1-C etc.
+  # Join on base_id so configs at different thresholds are matched correctly.
+  strat_avg_ranks <- strat_avg_ranks %>%
+    mutate(base_id = sub("-[^-]+$", "", config_id))
 
   threshold_robustness <- map_dfr(countries, function(ctry) {
     map_dfr(names(characteristics$raw), function(char_name) {
       map_dfr(thr_pairs, function(tp) {
         r1 <- strat_avg_ranks %>%
           filter(country == ctry, characteristic == char_name, threshold == tp[1]) %>%
-          select(config_id, r1 = avg_rank)
+          select(base_id, r1 = avg_rank)
         r2 <- strat_avg_ranks %>%
           filter(country == ctry, characteristic == char_name, threshold == tp[2]) %>%
-          select(config_id, r2 = avg_rank)
-        joined <- inner_join(r1, r2, by = "config_id")
+          select(base_id, r2 = avg_rank)
+        joined <- inner_join(r1, r2, by = "base_id")
         if (nrow(joined) < 3) return(data.frame(
           country = character(0), characteristic = character(0),
           thr_a = numeric(0), thr_b = numeric(0),
@@ -567,13 +506,13 @@ if (nrow(strat_avg_ranks) > 0) {
 
 message("\n=== Level 3: Spatial agreement tests ===")
 
-pf_path <- file.path(VOLUME_PATH, "pixel_freq_ref.rds")
+pf_path <- file.path(VOLUME_PATH, "pixel_freq_ref.parquet")
 
 if (!file.exists(pf_path)) {
-  message("  pixel_freq_ref.rds not found — skipping Level 3 (rerun Script 03 first)")
+  message("  pixel_freq_ref.parquet not found — skipping Level 3 (rerun Script 03 first)")
 } else {
 
-  pixel_freq <- as.data.frame(readRDS(pf_path))
+  pixel_freq <- as.data.frame(arrow::read_parquet(pf_path))
   message(sprintf("  pixel_freq_ref: %s rows, %d configs, %d pixels",
                   format(nrow(pixel_freq), big.mark = ","),
                   n_distinct(pixel_freq$config_id),

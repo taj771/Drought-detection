@@ -74,7 +74,11 @@ library(parallel)
 # =============================================================================
 
 # -- Data paths ---------------------------------------------------------------
-VOLUME_PATH            <- "/Volumes/projects/gwsc_drought/drought_outputs"
+# Allow caller (e.g. 00_v2_MASTER_RUN) to pre-set VOLUME_PATH to redirect outputs.
+# If not set, default to v1 path.
+if (!exists("VOLUME_PATH")) {
+  VOLUME_PATH <- "/Volumes/projects/gwsc_drought/drought_outputs"
+}
 spi_path               <- file.path(VOLUME_PATH, "spi_results.rds")
 spei_thornthwaite_path <- file.path(VOLUME_PATH, "spei_thornthwaite_results.rds")
 spei_penman_path       <- file.path(VOLUME_PATH, "spei_penman_results.rds")   # set NULL if not ready
@@ -562,6 +566,7 @@ for (i in seq_along(chunk_files)) {
 
     cy <- px_yr[, .(
       pixels_with_drought   = .N,
+      total_pixel_events    = sum(pixel_n_events,            na.rm = TRUE),
       mean_events_per_pixel = round(mean(pixel_n_events,      na.rm = TRUE), 1),
       mean_duration_months  = round(mean(pixel_mean_duration, na.rm = TRUE), 1),
       mean_peak_index       = round(mean(pixel_mean_peak,     na.rm = TRUE), 2),
@@ -617,14 +622,12 @@ if (length(non_null_yearly) > 0 && !is.null(ppc)) {
                                   by = "country", all.x = TRUE)
   drought_summary_yearly[, pct_pixels_affected := round(
     100 * pixels_with_drought / total_pixels_country, 1)]
-  drought_summary_yearly[, total_pixels_country := NULL]
   setorder(drought_summary_yearly, config_id, country, event_year)
 
-  n_years <- drought_summary_yearly[, uniqueN(event_year)]
-
   drought_annual_summary <- drought_summary_yearly[, .(
-    annual_freq_events   = round(sum(mean_events_per_pixel, na.rm = TRUE) / n_years, 2),
-    annual_pct_pixels    = round(sum(pct_pixels_affected,   na.rm = TRUE) / n_years, 1),
+    annual_freq_events   = round(sum(total_pixel_events, na.rm = TRUE) /
+                                   (total_pixels_country[[1L]] * uniqueN(event_year)), 3),
+    annual_pct_pixels    = round(sum(pct_pixels_affected,   na.rm = TRUE) / uniqueN(event_year), 1),
     annual_mean_duration = round(mean(mean_duration_months, na.rm = TRUE), 1),
     annual_mean_peak     = round(mean(mean_peak_index,      na.rm = TRUE), 2),
     annual_mean_severity = round(mean(mean_total_severity,  na.rm = TRUE), 2)

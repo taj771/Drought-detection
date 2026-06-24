@@ -422,7 +422,7 @@ if (length(wb_sources) == 0) {
 
   ll_parts <- mapply(extract_ll_from_wb, wb_sources, names(wb_sources),
                      SIMPLIFY = FALSE)
-  era5_loglogistic_params <- do.call(rbind, ll_parts)
+  era5_loglogistic_params <- dplyr::bind_rows(ll_parts)
 }
 
 cat(sprintf("Log-logistic params: %d rows | %d pixels covered\n",
@@ -444,6 +444,7 @@ message("Saved: era5_loglogistic_params_ref1973_2002.rds")
 # =============================================================================
 
 SPI_TMP <- file.path(VOLUME_PATH, "spi_era5_tmp")
+if (dir.exists(SPI_TMP)) unlink(SPI_TMP, recursive = TRUE)
 dir.create(SPI_TMP, showWarnings = FALSE, recursive = TRUE)
 
 cat(sprintf("\nApplying frozen Gamma params to full ERA5 series (%d pixels)...\n",
@@ -480,7 +481,7 @@ for (i in seq_len(nrow(pixels))) {
 
 cat("  Combining SPI pixel files...\n")
 spi_files <- list.files(SPI_TMP, pattern = "\\.rds$", full.names = TRUE)
-spi_era5  <- do.call(rbind, lapply(spi_files, readRDS))
+spi_era5  <- dplyr::bind_rows(lapply(spi_files, readRDS))
 spi_era5$date <- as.Date(sprintf("%d-%02d-01", spi_era5$year, spi_era5$month))
 spi_era5$period <- ifelse(spi_era5$year <= CALIB_END,
                            sprintf("%d-%d reference", CALIB_START, CALIB_END),
@@ -513,6 +514,7 @@ apply_ll_from_wb_source <- function(wb_df, pet_method_label, ll_params_all) {
   px_list <- wb_df %>% select(x, y) %>% distinct()
 
   SPEI_TMP_M <- file.path(VOLUME_PATH, paste0("spei_era5_tmp_", pet_method_label))
+  if (dir.exists(SPEI_TMP_M)) unlink(SPEI_TMP_M, recursive = TRUE)
   dir.create(SPEI_TMP_M, showWarnings = FALSE, recursive = TRUE)
 
   cat(sprintf("\nApplying log-logistic params [%s] to full ERA5 series (%d pixels)...\n",
@@ -554,7 +556,7 @@ apply_ll_from_wb_source <- function(wb_df, pet_method_label, ll_params_all) {
   cat(sprintf("  Combining SPEI pixel files [%s]...\n", pet_method_label))
   spei_files <- list.files(SPEI_TMP_M, pattern = "\\.rds$", full.names = TRUE)
   if (length(spei_files) == 0) return(data.frame())
-  result_df  <- do.call(rbind, lapply(spei_files, readRDS))
+  result_df  <- dplyr::bind_rows(lapply(spei_files, readRDS))
   unlink(SPEI_TMP_M, recursive = TRUE)
   result_df
 }
@@ -571,7 +573,7 @@ if (length(wb_sources) == 0 || nrow(era5_loglogistic_params) == 0) {
                        wb_sources, names(wb_sources),
                        MoreArgs = list(ll_params_all = era5_loglogistic_params),
                        SIMPLIFY = FALSE)
-  spei_era5 <- do.call(rbind, spei_parts)
+  spei_era5 <- dplyr::bind_rows(spei_parts)
 }
 
 spei_era5$date   <- as.Date(sprintf("%d-%02d-01", spei_era5$year, spei_era5$month))

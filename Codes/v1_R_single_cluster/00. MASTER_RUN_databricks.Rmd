@@ -21,16 +21,16 @@ message("SPEI available on cluster.")
 ```
 
 ```{r run-flags}
-RUN_SPI        <- FALSE  # Script 01: DONE 2026-05-04
-RUN_SPEI_T     <- FALSE  # Script 02a: DONE 2026-05-06
-RUN_SPEI_P     <- FALSE  # Script 02b: DONE 2026-05-06
-RUN_DETECTION  <- FALSE  # Script 03: DONE 2026-05-07 (summaries + all_drought_events saved)
-RUN_SANITY     <- FALSE  # Script 04: DONE 2026-05-05
-RUN_REF_PARAMS <- FALSE  # Script 05: DONE 2026-05-06
-RUN_FRIEDMAN   <- FALSE  # Script 06: DONE 2026-05-07
-RUN_CROSSPERIOD <- FALSE # Script 07: DONE 2026-05-06
-RUN_APPENDIX   <- FALSE  # Script 08: DONE 2026-05-06
-RUN_CDD_COMP   <- FALSE  # Script 09: DONE 2026-05-07
+RUN_SPI        <- FALSE  # Script 01 — done
+RUN_SPEI_T     <- FALSE  # Script 02a — done
+RUN_SPEI_P     <- FALSE  # Script 02b — done
+RUN_DETECTION  <- FALSE  # Script 03 — done
+RUN_SANITY     <- FALSE  # Script 04 — done
+RUN_REF_PARAMS <- FALSE  # Script 05 — done
+RUN_FRIEDMAN   <- FALSE  # Script 06 — done
+RUN_CROSSPERIOD <- TRUE  # Script 07 — pct_change stale, rerun
+RUN_APPENDIX   <- FALSE  # Script 08 — done
+RUN_CDD_COMP   <- FALSE  # Script 09 — done
 ```
 
 ```{r step1-spi}

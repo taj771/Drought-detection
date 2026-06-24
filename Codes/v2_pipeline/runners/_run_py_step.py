@@ -5,7 +5,7 @@ import time
 from pyspark.sql import SparkSession
 spark = SparkSession.builder.getOrCreate()
 
-SCRIPT_DIR = "/Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes"
+SCRIPT_DIR = "/Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes/v2_pipeline/python"
 
 dbutils.widgets.text("STEP", "")
 STEP = dbutils.widgets.get("STEP")
