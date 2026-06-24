@@ -33,10 +33,12 @@ library(sparklyr)
 library(dplyr)
 library(tidyr)
 library(purrr)
+library(arrow)   # read v2 .parquet inputs
 
 
 # -- Configuration ------------------------------------------------------------
-VOLUME_PATH    <- "/Volumes/projects/gwsc_drought/drought_outputs"
+# v2 pipeline writes .parquet to drought_outputs/v2.
+VOLUME_PATH    <- "/Volumes/projects/gwsc_drought/drought_outputs/v2"
 ERA5_CATALOG   <- "projects.xx_drought_index.drought_index_dailysummary"
 CDD_MIN_LENGTH <- 7       # minimum consecutive dry days to count as event
 DRY_THRESHOLD  <- 1       # mm/day; <= this = dry day
@@ -44,7 +46,8 @@ REF_START      <- 1973
 REF_END        <- 2002
 P_THRESHOLD    <- 0.05
 
-COUNTRIES <- c("Argentina", "Benin", "Thailand", "Greece", "Mexico", "South Africa")
+# v2 detection = Benin only; match it so the CDD↔SPI join has pixels on both sides.
+COUNTRIES <- c("Benin")
 
 
 # -- Spark connection ---------------------------------------------------------
@@ -192,63 +195,48 @@ message("Saved: cdd_era5_ref_avg.rds")
 
 message("\n=== Step 3: Load SPI/SPEI pixel frequency ===")
 
-# pixel_freq_ref.rds: columns — config_id, country, x, y, ref_n_events
-# Produced by Script 03 spatial block.
-# If missing (Script 03 assembly OOM'd before writing it), reconstruct from
-# all_drought_events.rds — filter to ref period, sum events per pixel × config.
-pixel_freq_path    <- file.path(VOLUME_PATH, "pixel_freq_ref.rds")
-all_events_path    <- file.path(VOLUME_PATH, "all_drought_events.rds")
-
-tmp_dir <- file.path(VOLUME_PATH, "detection_tmp")
+# pixel_freq_ref.parquet: columns — config_id, country, x, y, ref_n_events
+# Produced by Script 03_v2 spatial block. If missing, reconstruct from
+# all_drought_events.parquet (v2 writes ONE parquet, not per-config cfg files):
+# filter to ref period, sum events per pixel × config.
+pixel_freq_path <- file.path(VOLUME_PATH, "pixel_freq_ref.parquet")
+all_events_path <- file.path(VOLUME_PATH, "all_drought_events.parquet")
 
 if (file.exists(pixel_freq_path)) {
-  pixel_freq <- readRDS(pixel_freq_path)
-  if (inherits(pixel_freq, "data.table")) pixel_freq <- as.data.frame(pixel_freq)
-  message(sprintf("Loaded pixel_freq_ref.rds — cols: %s | country present: %s",
+  pixel_freq <- as.data.frame(arrow::read_parquet(pixel_freq_path))
+  message(sprintf("Loaded pixel_freq_ref.parquet — cols: %s | country present: %s",
                   paste(names(pixel_freq), collapse = ", "),
                   "country" %in% names(pixel_freq)))
-  # Rebuild if country column missing (stale file from earlier run)
   if (!"country" %in% names(pixel_freq)) {
-    message("pixel_freq_ref.rds missing country — will rebuild from cfg files")
-    file.remove(pixel_freq_path)
+    message("pixel_freq_ref.parquet missing country — will rebuild from events")
     pixel_freq <- NULL
   }
 }
 
 if (!exists("pixel_freq") || is.null(pixel_freq)) {
-  cfg_files <- list.files(tmp_dir, pattern = "^cfg_.*\\.rds$", full.names = TRUE)
-  if (length(cfg_files) == 0) {
-    stop("No cfg_*.rds files in detection_tmp/. Run Script 03 first.")
+  if (!file.exists(all_events_path)) {
+    stop("Neither pixel_freq_ref.parquet nor all_drought_events.parquet found — run Script 03_v2 first.")
   }
-  message(sprintf("Rebuilding pixel_freq_ref from %d cfg files...", length(cfg_files)))
+  message("Rebuilding pixel_freq_ref from all_drought_events.parquet...")
   library(data.table)
-  pf_list <- vector("list", length(cfg_files))
-  for (i in seq_along(cfg_files)) {
-    chunk <- readRDS(cfg_files[[i]])
-    if (is.null(chunk) || nrow(chunk) == 0) next
-    if (!"country" %in% names(chunk)) next
-    dt <- as.data.table(chunk)
-    if (!"start_year" %in% names(dt) && "start_date" %in% names(dt)) {
-      dt[, start_year := as.integer(format(as.Date(start_date), "%Y"))]
-    }
-    if (!"start_year" %in% names(dt)) next
-    pf_list[[i]] <- dt[
-      start_year >= REF_START & start_year <= REF_END,
-      .(ref_n_events = .N),
-      by = .(config_id, country, x, y)
-    ]
-    rm(chunk, dt)
+  dt <- as.data.table(arrow::read_parquet(all_events_path))
+  if (!"start_year" %in% names(dt) && "start_date" %in% names(dt)) {
+    dt[, start_year := as.integer(format(as.Date(start_date), "%Y"))]
   }
-  non_null <- Filter(Negate(is.null), pf_list)
-  rm(pf_list); gc()
-  if (length(non_null) == 0) stop("No ref-period events found in cfg files.")
-  pixel_freq <- as.data.frame(rbindlist(non_null, use.names = TRUE, fill = TRUE))
-  rm(non_null); gc()
+  if (!"start_year" %in% names(dt) && "event_year" %in% names(dt)) {
+    dt[, start_year := event_year]
+  }
+  pixel_freq <- as.data.frame(dt[
+    start_year >= REF_START & start_year <= REF_END,
+    .(ref_n_events = .N),
+    by = .(config_id, country, x, y)
+  ])
+  rm(dt); gc()
   message(sprintf("Rebuilt pixel_freq — %s rows, cols: %s",
                   format(nrow(pixel_freq), big.mark = ","),
                   paste(names(pixel_freq), collapse = ", ")))
-  saveRDS(pixel_freq, pixel_freq_path)
-  message("Saved: pixel_freq_ref.rds")
+  arrow::write_parquet(pixel_freq, pixel_freq_path)
+  message("Saved: pixel_freq_ref.parquet")
 }
 
 message(sprintf("SPI/SPEI pixel freq rows: %s", format(nrow(pixel_freq), big.mark = ",")))

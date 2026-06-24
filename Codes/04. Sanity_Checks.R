@@ -15,8 +15,9 @@
 #   5. Symmetric threshold test — inline detect_droughts() on one pixel
 #
 # Inputs (VOLUME_PATH):
-#   detection_tmp/cfg_*.rds   — per-config event files (Script 03)
-#   spi_results.rds           — SPI time series (Script 01)
+#   all_drought_events.parquet — all detection events (Script 03_v2), split
+#                                by config_id in-script
+#   spi_results.parquet        — SPI time series (Script 01_v2)
 #
 # Outputs (VOLUME_PATH/Figures):
 #   sanity_check1_events_sample.png
@@ -27,6 +28,15 @@
 
 
 # -- Libraries ----------------------------------------------------------------
+# terra 1.7-78 is pinned in the cluster init script (latest fails on the image's
+# old Rcpp). rnaturalearth, however, only installs reliably on the running driver
+# — at boot the init Rscript dies before reaching it. So bootstrap it here, on
+# the driver, where it provably builds (terra + units are already present).
+if (!requireNamespace("rnaturalearth", quietly = TRUE)) {
+  install.packages("rnaturalearth",
+    repos = "https://packagemanager.posit.co/cran/__linux__/noble/latest")
+}
+
 # sf before terra — prevents namespace masking crash on Databricks
 library(dplyr)
 library(ggplot2)
@@ -37,12 +47,13 @@ library(sf)
 library(terra)
 library(rnaturalearth)
 library(rnaturalearthdata)
+library(arrow)   # read v2 .parquet inputs
 
 
 # -- Paths --------------------------------------------------------------------
-VOLUME_PATH   <- "/Volumes/projects/gwsc_drought/drought_outputs"
+# v2 pipeline writes .parquet to drought_outputs/v2.
+VOLUME_PATH   <- "/Volumes/projects/gwsc_drought/drought_outputs/v2"
 FIGURES_PATH  <- file.path(VOLUME_PATH, "Figures")
-TMP_PATH      <- file.path(VOLUME_PATH, "detection_tmp")
 LOG_PATH      <- file.path(VOLUME_PATH, "script04_error.txt")
 
 dir.create(FIGURES_PATH, showWarnings = FALSE, recursive = TRUE)
@@ -63,17 +74,20 @@ dir.create(FIGURES_PATH, showWarnings = FALSE, recursive = TRUE)
 writeLines(paste0("[", Sys.time(), "] Script 04 started"), LOG_PATH)
 
 
-# -- Discover cfg files -------------------------------------------------------
-cfg_files <- sort(list.files(TMP_PATH, pattern = "^cfg_.*\\.rds$",
-                              full.names = TRUE))
-n_cfg <- length(cfg_files)
-.log(sprintf("Found %d cfg_*.rds files in detection_tmp", n_cfg))
-if (n_cfg == 0) stop("No cfg_*.rds files found — script 03 may not have run.")
+# -- Discover detection output ------------------------------------------------
+# v2 distributed detection (03_v2) writes a SINGLE all_drought_events.parquet
+# (all configs), not per-config cfg_*.parquet files — the cfg streaming pattern
+# was a v1 OOM workaround. We read the one parquet and split it by config_id so
+# the per-config streaming loop below is unchanged. KEEP_COLS is pushed down to
+# arrow so only needed columns are materialised (keeps peak RAM low).
+EVENTS_PARQUET <- file.path(VOLUME_PATH, "all_drought_events.parquet")
+if (!file.exists(EVENTS_PARQUET))
+  stop("all_drought_events.parquet not found — script 03_v2 may not have run.")
 
 
 # -- Load SPI data (needed for Check 1 and Check 5) --------------------------
-.log("Loading spi_results.rds (~268 MB)...")
-spi_data <- readRDS(file.path(VOLUME_PATH, "spi_results.rds"))
+.log("Loading spi_results.parquet...")
+spi_data <- as.data.frame(arrow::read_parquet(file.path(VOLUME_PATH, "spi_results.parquet")))
 .log(sprintf("spi_data: %d rows x %d cols", nrow(spi_data), ncol(spi_data)))
 
 
@@ -105,19 +119,29 @@ known_droughts <- data.frame(
 all_pixel_set <- unique(paste(spi_data$x, spi_data$y))
 .log(sprintf("Total SPI pixels: %d", length(all_pixel_set)))
 
-.log("Starting streaming pass through cfg files...")
+.log("Reading all_drought_events.parquet (column pushdown)...")
+
+# Read once, only the columns the checks need. Then split by config_id so the
+# loop streams one config at a time (peak RAM = one config chunk + spi_data).
+events_tbl  <- arrow::read_parquet(EVENTS_PARQUET, as_data_frame = FALSE)
+present_cols <- KEEP_COLS[KEEP_COLS %in% names(events_tbl)]
+events_df   <- as.data.frame(dplyr::select(events_tbl, dplyr::all_of(present_cols)))
+rm(events_tbl); gc(verbose = FALSE)
+
+if (!"config_id" %in% names(events_df))
+  stop("all_drought_events.parquet missing config_id column.")
+
+cfg_splits <- split(events_df, events_df$config_id)
+rm(events_df); gc(verbose = FALSE)
+.log(sprintf("Found %d configs in all_drought_events.parquet", length(cfg_splits)))
 
 set.seed(42)
 
-for (f in cfg_files) {
+for (cfg in cfg_splits) {
 
-  cfg <- tryCatch(readRDS(f), error = function(e) {
-    .log(paste0("  SKIP unreadable file: ", basename(f), " — ", conditionMessage(e)))
-    return(NULL)
-  })
   if (is.null(cfg) || nrow(cfg) == 0) next
 
-  # Subset to needed columns only
+  # Subset to needed columns only (already pushed down, but keep for safety)
   present <- KEEP_COLS[KEEP_COLS %in% names(cfg)]
   cfg     <- cfg[, present, drop = FALSE]
 

@@ -18,6 +18,8 @@ sync:
     - "Codes/02b_v2_SPEI_Penman_pandas_udf.py"
     - "Codes/03_v2_Drought_Detection_pandas_udf.py"
     - "Codes/05_v2_Reference_Period_Params_pandas_udf.py"
+    - "Codes/_run_py_step.py"
+    - "Codes/_run_r_step.r"
     - "Codes/03. Drought_Detection.R"
     - "Codes/04. Sanity_Checks.R"
     - "Codes/05. Reference_Period_Params.R"
@@ -74,12 +76,104 @@ resources:
 
     drought_pipeline_v2:
       name: "Drought Index Pipeline — V2 Pandas UDF"
+      # Single-shot DAG: distributed Python index calc + detection (01/02a/02b→03),
+      # then R stats/figures off all_drought_events.parquet (04,05,06,07,08,09).
+      # 07 comparison period = ERA5 2003-2023 (NOT CMIP6) — split from the same
+      # detection output, so it runs in Phase 1. 07 depends on 06 (avg ranks).
+      # Python steps run via _run_py_step (exec); R steps via _run_r_step (source).
+      # Branch new analyses by adding a task that depends_on detect_03.
       tasks:
-        - task_key: run_pipeline_v2
-          existing_cluster_id: 0616-154127-izvo5r0w  # multi-node (drought-r-spark-apply)
+        # -- Stage 1: index calculation (parallel) ----------------------------
+        - task_key: spi_01
+          existing_cluster_id: 0616-154127-izvo5r0w
           notebook_task:
-            notebook_path: /Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes/00_v2_MASTER_RUN_pandas_udf
+            notebook_path: /Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes/_run_py_step
             source: WORKSPACE
+            base_parameters: { STEP: "01_v2_SPI_pandas_udf.py" }
+          timeout_seconds: 86400
+
+        - task_key: speit_02a
+          existing_cluster_id: 0616-154127-izvo5r0w
+          notebook_task:
+            notebook_path: /Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes/_run_py_step
+            source: WORKSPACE
+            base_parameters: { STEP: "02a_v2_SPEI_Thornthwaite_pandas_udf.py" }
+          timeout_seconds: 86400
+
+        - task_key: speip_02b
+          existing_cluster_id: 0616-154127-izvo5r0w
+          notebook_task:
+            notebook_path: /Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes/_run_py_step
+            source: WORKSPACE
+            base_parameters: { STEP: "02b_v2_SPEI_Penman_pandas_udf.py" }
+          timeout_seconds: 86400
+
+        # -- Stage 2: detection (joins all 3 indices) -------------------------
+        - task_key: detect_03
+          depends_on:
+            - task_key: spi_01
+            - task_key: speit_02a
+            - task_key: speip_02b
+          existing_cluster_id: 0616-154127-izvo5r0w
+          notebook_task:
+            notebook_path: /Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes/_run_py_step
+            source: WORKSPACE
+            base_parameters: { STEP: "03_v2_Drought_Detection_pandas_udf.py" }
+          timeout_seconds: 86400
+
+        # -- Stage 3: stats + figures off detection output (parallel) ---------
+        - task_key: sanity_04
+          depends_on: [{ task_key: detect_03 }]
+          existing_cluster_id: 0616-154127-izvo5r0w
+          notebook_task:
+            notebook_path: /Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes/_run_r_step
+            source: WORKSPACE
+            base_parameters: { STEP: "04. Sanity_Checks.R" }
+          timeout_seconds: 86400
+
+        - task_key: params_05
+          depends_on: [{ task_key: detect_03 }]
+          existing_cluster_id: 0616-154127-izvo5r0w
+          notebook_task:
+            notebook_path: /Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes/_run_py_step
+            source: WORKSPACE
+            base_parameters: { STEP: "05_v2_Reference_Period_Params_pandas_udf.py" }
+          timeout_seconds: 86400
+
+        - task_key: friedman_06
+          depends_on: [{ task_key: detect_03 }]
+          existing_cluster_id: 0616-154127-izvo5r0w
+          notebook_task:
+            notebook_path: /Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes/_run_r_step
+            source: WORKSPACE
+            base_parameters: { STEP: "06. Analysis1_Friedman.R" }
+          timeout_seconds: 86400
+
+        - task_key: crossperiod_07
+          depends_on: [{ task_key: friedman_06 }]
+          existing_cluster_id: 0616-154127-izvo5r0w
+          notebook_task:
+            notebook_path: /Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes/_run_r_step
+            source: WORKSPACE
+            base_parameters: { STEP: "07. Analysis2_CrossPeriod.R" }
+          timeout_seconds: 86400
+
+        - task_key: appendix_08
+          depends_on: [{ task_key: detect_03 }]
+          existing_cluster_id: 0616-154127-izvo5r0w
+          notebook_task:
+            notebook_path: /Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes/_run_r_step
+            source: WORKSPACE
+            base_parameters: { STEP: "08. AppendixA1_Figure.R" }
+          timeout_seconds: 86400
+
+        - task_key: cdd_09
+          depends_on: [{ task_key: detect_03 }]
+          existing_cluster_id: 0616-154127-izvo5r0w
+          notebook_task:
+            notebook_path: /Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes/_run_r_step
+            source: WORKSPACE
+            base_parameters: { STEP: "09. CDD_SPI_Comparison.R" }
           timeout_seconds: 86400
 
     drought_era5_monitor:
