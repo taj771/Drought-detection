@@ -6,7 +6,7 @@ bundle:
 
 sync:
   include:
-    - "Codes/App/**"
+    - "Codes/app_monitor/**"
     # v2 pipeline (live) — Python pandas_udf + R stats + runners + init
     - "Codes/v2_pipeline/**"
     # v1 pipeline (R single-cluster) — kept for reference
@@ -151,10 +151,12 @@ resources:
 
     drought_era5_monitor:
       name: "GWSC Drought ERA5 Monitor"
+      # Standalone operational monitor: R + single cluster, reads v2's era5_daily_nn
+      # source (data-consistent with v2), detects droughts + plots. No stats.
       tasks:
         - task_key: run_app
           existing_cluster_id: 0123-211315-fp4hw1e8
           notebook_task:
-            notebook_path: /Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes/App/00_APP_MASTER
+            notebook_path: /Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes/app_monitor/00_APP_MASTER
             source: WORKSPACE
 

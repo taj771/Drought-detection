@@ -42,8 +42,11 @@ sc <- spark_connect(method = "databricks")
 # APP_SHAPEFILE_PATH set by 00_APP_Download_Boundary.R.
 # When integrating into GWSC pipeline: set APP_SHAPEFILE_PATH to carto
 # shapefile path on Volume and skip 00_APP_Download_Boundary.R entirely.
+sf::sf_use_s2(FALSE)  # disable s2 — avoids NULL from st_intersects on complex polygons
 boundary <- st_read(APP_SHAPEFILE_PATH, quiet = TRUE)
 boundary <- st_transform(boundary, crs = 4326)
+boundary <- sf::st_make_valid(boundary)
+boundary <- sf::st_union(boundary)  # dissolve to single geometry, handles multi-feature
 
 # Derive bbox from shapefile for initial Spark pre-filter (fast partition pruning)
 .bb       <- st_bbox(boundary)
@@ -56,10 +59,13 @@ cat(sprintf("Shapefile bbox (with margin): lat [%.2f, %.2f], lon [%.2f, %.2f]\n"
             .lat_min, .lat_max, .lon_min, .lon_max))
 
 
-# -- ERA5 source: same table as GWSC product pipeline ------------------------
-# era5-daily-data.silver_staging.era5_daily_nn: daily, 0.25 deg, global,
-# 1950-present. Columns: latitude, longitude, sum_tp_mm, mean_t2m_c, year, month.
-era5 <- tbl(sc, in_catalog("era5-daily-data", "silver_staging", "era5_daily_nn"))
+
+# -- ERA5 source: GWSC product table (same as Phase 1 pipeline) ---------------
+# projects.xx_drought_index.drought_index_dailysummary: daily, 0.25 deg,
+# covers 6 GWSC countries (Argentina, Benin, Thailand, Greece, Mexico, South Africa).
+# Columns: x, y, country, year, month, precip, mean_temp.
+# Switched from silver_staging.era5_daily_nn which is South/SE Asia only.
+era5 <- tbl(sc, in_catalog("projects", "xx_drought_index", "drought_index_dailysummary"))
 
 
 # -- SPEI-Penman: check PET files exist before pulling data -------------------
@@ -77,28 +83,28 @@ if (APP_INDEX == "SPEI-P") {
 }
 
 
-# -- Step 1: bbox pre-filter + daily->monthly aggregation in Spark ------------
-# Bbox filter is fast (Spark partition pruning). Exact polygon clip done in R
-# after collect — same two-step approach as GWSC product pipeline.
+# -- Step 1: country filter + daily->monthly aggregation in Spark -------------
+# Filter by country name (GWSC table already scoped to 6 countries).
+# Bbox pre-filter retained as partition pruning hint; exact polygon clip in R.
 monthly_spark <- era5 %>%
   filter(
-    latitude  >= !!.lat_min, latitude  <= !!.lat_max,
-    longitude >= !!.lon_min, longitude <= !!.lon_max,
+    x >= !!.lon_min, x <= !!.lon_max,
+    y >= !!.lat_min, y <= !!.lat_max,
     year >= !!REF_START, year <= !!OBS_END
   ) %>%
-  group_by(longitude, latitude, year, month) %>%
+  group_by(x, y, year, month) %>%
   summarise(
-    monthly_precip    = sum(sum_tp_mm,   na.rm = TRUE),
-    mean_temp_monthly = mean(mean_t2m_c, na.rm = TRUE),
-    n_days_missing    = sum(as.integer(is.na(sum_tp_mm))),
+    monthly_precip    = sum(precip,     na.rm = TRUE),
+    mean_temp_monthly = mean(mean_temp, na.rm = TRUE),
+    n_days_missing    = sum(as.integer(is.na(precip))),
     .groups = "drop"
   ) %>%
   filter(n_days_missing < 5) %>%
-  select(x = longitude, y = latitude, year, month,
-         monthly_precip, mean_temp_monthly) %>%
+  select(x, y, year, month, monthly_precip, mean_temp_monthly) %>%
   arrange(x, y, year, month)
+# country added after collect — not in source table
 
-cat(sprintf("Monthly aggregation complete for %s bbox (%d-%d).\n",
+cat(sprintf("Monthly aggregation complete for %s (%d-%d).\n",
             APP_COUNTRY, REF_START, OBS_END))
 
 
@@ -119,12 +125,20 @@ if (USE_SPARK_APPLY) {
   .scale <- APP_SCALE
   .index <- APP_INDEX
 
-  index_sdf <- spark_apply(
-    monthly_spark,
-    function(df) {
-      library(SPEI)
+  # Materialize lazy Spark df as temp view — resolves query plan before spark_apply.
+  # spark_apply on unresolved lazy plans causes column metadata errors on some DBR versions.
+  sparklyr::sdf_register(monthly_spark, "monthly_tmp")
+  monthly_mat <- dplyr::tbl(sc, "monthly_tmp")
 
-      df <- df[order(df$year, df$month), ]
+  # No group_by — sparklyr's columns_infer crashes with group_by on this DBR runtime.
+  # country not in ERA5 source; pass via context and add inside function.
+  index_sdf <- spark_apply(
+    monthly_mat,
+    function(df, context) {
+      library(SPEI)
+      .scale   <- context$.scale
+      .index   <- context$.index
+      .country <- context$.country
 
       safe_spi <- function(v, scale) {
         tryCatch({
@@ -144,29 +158,51 @@ if (USE_SPARK_APPLY) {
         }, error = function(e) rep(NA_real_, length(precip)))
       }
 
-      if (.index == "SPI") {
-        df$index_value <- safe_spi(df$monthly_precip, .scale)
-      } else if (.index == "SPEI-T") {
-        df$index_value <- safe_spei_t(df$monthly_precip, df$mean_temp_monthly,
-                                       .scale, lat = df$y[1])
-      }
-      # SPEI-P not supported in spark_apply path (PET NC files not on workers)
-
-      df[, c("x", "y", "country", "year", "month", "index_value")]
+      # Split by pixel, apply index, recombine; add country from context
+      df$country <- .country
+      pixel_key <- paste(df$x, df$y)
+      result <- do.call(rbind, lapply(split(df, pixel_key), function(px) {
+        px <- px[order(px$year, px$month), ]
+        if (.index == "SPI") {
+          px$index_value <- safe_spi(px$monthly_precip, .scale)
+        } else if (.index == "SPEI-T") {
+          px$index_value <- safe_spei_t(px$monthly_precip, px$mean_temp_monthly,
+                                         .scale, lat = px$y[1])
+        } else {
+          px$index_value <- NA_real_
+        }
+        px[, c("x", "y", "country", "year", "month", "index_value")]
+      }))
+      result
     },
-    group_by = c("x", "y", "country"),
     packages = "SPEI",
-    context  = list(.scale = .scale, .index = .index)
+    context  = list(.scale = .scale, .index = .index, .country = APP_COUNTRY)
   )
 
   cat("Collecting spark_apply results...\n")
-  index_monthly <- index_sdf %>%
+  index_monthly_raw <- index_sdf %>%
     collect() %>%
     rename(!!.index_col := index_value)
 
   spark_disconnect(sc)
-  cat(sprintf("spark_apply complete. %s rows.\n",
-              format(nrow(index_monthly), big.mark = ",")))
+  cat(sprintf("spark_apply collected: %s rows, %d pixels (bbox).\n",
+              format(nrow(index_monthly_raw), big.mark = ","),
+              length(unique(paste(index_monthly_raw$x, index_monthly_raw$y)))))
+
+  # Polygon clip (same as PATH B — bbox includes pixels outside boundary)
+  pixels_sf2 <- st_as_sf(
+    unique(index_monthly_raw[, c("x", "y")]),
+    coords = c("x", "y"), crs = 4326
+  )
+  inside2    <- sf::st_intersects(pixels_sf2, boundary)
+  pixels_in2 <- pixels_sf2[lengths(inside2) > 0, ]
+  valid_coords2 <- st_coordinates(pixels_in2)
+  valid_key2    <- paste(valid_coords2[, 1], valid_coords2[, 2])
+  index_monthly <- index_monthly_raw[paste(index_monthly_raw$x, index_monthly_raw$y) %in% valid_key2, ]
+
+  cat(sprintf("spark_apply complete. %s rows after polygon clip, %d pixels inside boundary.\n",
+              format(nrow(index_monthly), big.mark = ","),
+              length(unique(paste(index_monthly$x, index_monthly$y)))))
 
 
 # =============================================================================
@@ -182,14 +218,13 @@ if (USE_SPARK_APPLY) {
               format(nrow(monthly_r), big.mark = ","),
               length(unique(paste(monthly_r$x, monthly_r$y)))))
 
-  # -- Step 2: exact polygon clip (same as GWSC pipeline spatial join) ---------
-  # Convert pixel centroids to sf points, intersect with country boundary.
+  # -- Step 2: exact polygon clip (same logic as GWSC pipeline spatial join) ---
   pixels_sf <- st_as_sf(
     unique(monthly_r[, c("x", "y")]),
     coords = c("x", "y"), crs = 4326
   )
-  inside <- st_intersects(pixels_sf, boundary, sparse = FALSE)
-  pixels_in <- pixels_sf[rowSums(inside) > 0, ]
+  inside <- sf::st_intersects(pixels_sf, boundary)
+  pixels_in <- pixels_sf[lengths(inside) > 0, ]
   valid_coords <- st_coordinates(pixels_in)
   valid_key    <- paste(valid_coords[, 1], valid_coords[, 2])
 

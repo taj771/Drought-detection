@@ -52,9 +52,9 @@ summarise_period <- function(events_df, yr_start, yr_end, n_px) {
 
   freq <- sum(events_per_pixel$n_events) / (n_px * n_years)
 
-  # Duration and severity: mean across all events
-  duration <- mean(events_df$duration_months, na.rm = TRUE)
-  severity <- mean(events_df$peak_index,      na.rm = TRUE)
+  # Duration and severity: mean across all events (exclude Inf/-Inf from bad pixels)
+  duration <- mean(events_df$duration_months[is.finite(events_df$duration_months)], na.rm = TRUE)
+  severity <- mean(events_df$peak_index[is.finite(events_df$peak_index)],           na.rm = TRUE)
 
   # Pixels affected at least once in the period
   n_pixels_affected <- length(unique(paste(events_df$x, events_df$y)))

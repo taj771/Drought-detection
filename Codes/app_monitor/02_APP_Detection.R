@@ -58,8 +58,8 @@ detect_droughts_threshold <- function(index_vec, dates, start_thr) {
       start_date      = ev_d[1L],
       end_date        = ev_d[length(ev_d)],
       duration_months = length(ev_d),
-      peak_index      = min(ev_v),
-      total_severity  = sum(ev_v),
+      peak_index      = if (length(ev_v) > 0) min(ev_v, na.rm = TRUE) else NA_real_,
+      total_severity  = if (length(ev_v) > 0) sum(ev_v, na.rm = TRUE) else NA_real_,
       stringsAsFactors = FALSE
     )
   })
