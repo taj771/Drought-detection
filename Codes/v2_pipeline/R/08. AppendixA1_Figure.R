@@ -19,14 +19,17 @@
 library(dplyr)
 library(ggplot2)
 library(lubridate)
+library(arrow)   # read v2 .parquet inputs
 
 
 # -- Configuration ------------------------------------------------------------
-VOLUME_PATH  <- "/Volumes/projects/gwsc_drought/drought_outputs"
+# v2 pipeline writes .parquet to drought_outputs/v2.
+VOLUME_PATH  <- "/Volumes/projects/gwsc_drought/drought_outputs/v2"
 FIGURES_PATH <- file.path(VOLUME_PATH, "Figures")
 
-TARGET_X     <- 100.375
-TARGET_Y     <-  14.625
+# Benin pixel (v2 = Benin only; old default x=100 was Thailand from v1).
+TARGET_X     <- 0.875
+TARGET_Y     <- 6.375
 TARGET_INDEX <- "spi6"
 TARGET_METHOD <- "threshold"
 TARGET_THR   <- 0.0
@@ -38,16 +41,22 @@ dir.create(FIGURES_PATH, showWarnings = FALSE, recursive = TRUE)
 # -- Load data ----------------------------------------------------------------
 # Use spi_results.rds (script 01 output) — has spi6, smaller than spi_era5 file.
 message("Loading SPI data...")
-spi_data <- readRDS(file.path(VOLUME_PATH, "spi_results.rds"))
+spi_data <- as.data.frame(arrow::read_parquet(file.path(VOLUME_PATH, "spi_results.parquet")))
 
-# Load only the target config chunk — avoids OOM from all_drought_events.rds (1500 MB).
+# v2 detection writes a single all_drought_events.parquet (not per-config cfg
+# files). Filter to the target config with arrow predicate pushdown so only that
+# config's rows are materialised — avoids OOM from the full event table.
 message("Loading drought events for target config...")
-cfg_file <- file.path(VOLUME_PATH, "detection_tmp",
-                      paste0("cfg_", TARGET_CONFID, ".rds"))
-if (!file.exists(cfg_file)) {
-  stop(sprintf("Config file not found: %s", cfg_file))
+events_parquet <- file.path(VOLUME_PATH, "all_drought_events.parquet")
+if (!file.exists(events_parquet)) {
+  stop(sprintf("Events file not found: %s", events_parquet))
 }
-events <- readRDS(cfg_file)
+events <- arrow::read_parquet(events_parquet) %>%
+  dplyr::filter(config_id == TARGET_CONFID) %>%
+  as.data.frame()
+if (nrow(events) == 0) {
+  stop(sprintf("No events for config_id %s in all_drought_events.parquet", TARGET_CONFID))
+}
 
 
 # -- Extract pixel time series ------------------------------------------------

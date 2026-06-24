@@ -28,8 +28,13 @@ library(purrr)
 library(tidyr)
 
 
+library(arrow)   # read v2 .parquet inputs
+
 # -- Configuration ------------------------------------------------------------
-VOLUME_PATH  <- "/Volumes/projects/gwsc_drought/drought_outputs"
+# v2 pipeline writes .parquet to drought_outputs/v2. Caller can override.
+if (!exists("VOLUME_PATH")) {
+  VOLUME_PATH <- "/Volumes/projects/gwsc_drought/drought_outputs/v2"
+}
 REF_START    <- 1973
 REF_END      <- 2002
 COMP_START   <- 2003
@@ -42,7 +47,7 @@ P_THRESHOLD  <- 0.05
 # Split here into reference and comparison periods by year filter.
 # Column rename matches script 06 convention.
 message("Loading annual summaries...")
-yearly_full <- readRDS(file.path(VOLUME_PATH, "drought_summary_yearly_ref.rds")) %>%
+yearly_full <- arrow::read_parquet(file.path(VOLUME_PATH, "drought_summary_yearly_ref.parquet")) %>%
   rename(
     annual_freq_events   = mean_events_per_pixel,
     annual_mean_duration = mean_duration_months,
@@ -60,7 +65,21 @@ cv_lookup <- yearly_full %>%
   )
 yearly_full <- yearly_full %>% left_join(cv_lookup, by = c("config_id", "country"))
 
-avg_ranks_ref <- readRDS(file.path(VOLUME_PATH, "analysis1_avg_ranks.rds"))
+# Reference avg ranks from Script 06. The stratified redesign writes
+# analysis1_strat_avg_ranks.rds (per-threshold), not the old flat
+# analysis1_avg_ranks.rds. Load whichever exists; Step 3 (rank stability) is
+# guarded below and skipped if the expected schema is absent.
+.ranks_flat  <- file.path(VOLUME_PATH, "analysis1_avg_ranks.rds")
+.ranks_strat <- file.path(VOLUME_PATH, "analysis1_strat_avg_ranks.rds")
+avg_ranks_ref <- if (file.exists(.ranks_flat)) {
+  readRDS(.ranks_flat)
+} else if (file.exists(.ranks_strat)) {
+  message("Using stratified avg ranks (analysis1_strat_avg_ranks.rds).")
+  readRDS(.ranks_strat)
+} else {
+  message("No avg-ranks file found — Step 3 rank stability will be skipped.")
+  NULL
+}
 
 annual_ref  <- yearly_full %>% filter(event_year >= REF_START,  event_year <= REF_END)
 annual_comp <- yearly_full %>% filter(event_year >= COMP_START, event_year <= COMP_END)
@@ -141,6 +160,26 @@ pct_change_all <- map_dfr(names(char_cols), function(char_name) {
       )
     )
 })
+
+# Recompute pct_change from value_ref/value_comp to guard against join issues
+pct_change_all <- pct_change_all %>%
+  mutate(
+    pct_change = round(
+      ifelse(
+        is.na(value_ref) | value_ref == 0,
+        NA_real_,
+        (value_comp - value_ref) / abs(value_ref) * 100
+      ),
+      1
+    ),
+    pct_change = ifelse(characteristic == "severity", -pct_change, pct_change),
+    direction  = case_when(
+      is.na(pct_change) ~ "undefined",
+      pct_change  > 0   ~ "increase",
+      pct_change  < 0   ~ "decrease",
+      TRUE              ~ "no_change"
+    )
+  )
 
 cat(sprintf("%% change rows: %d\n", nrow(pct_change_all)))
 saveRDS(pct_change_all, file.path(VOLUME_PATH, "analysis2_pct_change.rds"))
@@ -273,43 +312,55 @@ message("Saved: analysis2_friedman_comp.rds")
 
 message("\n=== Step 3: Rank stability check (descriptive) ===")
 
-avg_ranks_ref_raw <- avg_ranks_ref %>%
-  filter(!calibrated) %>%
-  select(config_id, country, characteristic, avg_rank_ref = avg_rank)
+# Guard: needs a reference avg-ranks frame with the flat schema
+# (config_id, country, characteristic, calibrated, avg_rank). The stratified
+# redesign (Script 06) writes a per-threshold frame without `calibrated`, so
+# skip this descriptive step when the expected columns are missing.
+.have_ranks <- !is.null(avg_ranks_ref) &&
+  all(c("config_id", "country", "characteristic", "calibrated", "avg_rank")
+      %in% names(avg_ranks_ref))
 
-rank_stability <- inner_join(
-  avg_ranks_ref_raw,
-  avg_ranks_comp,
-  by = c("config_id", "country", "characteristic")
-) %>%
-  mutate(
-    rank_change      = avg_rank_comp - avg_rank_ref,
-    rank_change_abs  = abs(rank_change),
-    rank_direction   = case_when(
-      rank_change  > 0.5  ~ "rank_up",
-      rank_change  < -0.5 ~ "rank_down",
-      TRUE                ~ "stable"
-    )
+if (!.have_ranks) {
+  message("Skipping Step 3 (rank stability) — reference avg ranks not in the ",
+          "expected flat schema. Re-run Script 06's flat-rank output to enable.")
+} else {
+  avg_ranks_ref_raw <- avg_ranks_ref %>%
+    filter(!calibrated) %>%
+    select(config_id, country, characteristic, avg_rank_ref = avg_rank)
+
+  rank_stability <- inner_join(
+    avg_ranks_ref_raw,
+    avg_ranks_comp,
+    by = c("config_id", "country", "characteristic")
   ) %>%
-  arrange(country, characteristic, avg_rank_ref)
+    mutate(
+      rank_change      = avg_rank_comp - avg_rank_ref,
+      rank_change_abs  = abs(rank_change),
+      rank_direction   = case_when(
+        rank_change  > 0.5  ~ "rank_up",
+        rank_change  < -0.5 ~ "rank_down",
+        TRUE                ~ "stable"
+      )
+    ) %>%
+    arrange(country, characteristic, avg_rank_ref)
 
-# Spearman correlation between ref and comp rank orders per country × char
-rank_correlation <- rank_stability %>%
-  group_by(country, characteristic) %>%
-  summarise(
-    spearman_r  = round(cor(avg_rank_ref, avg_rank_comp,
-                            method = "spearman", use = "complete.obs"), 3),
-    n_stable    = sum(rank_direction == "stable"),
-    n_rank_up   = sum(rank_direction == "rank_up"),
-    n_rank_down = sum(rank_direction == "rank_down"),
-    .groups = "drop"
-  )
+  rank_correlation <- rank_stability %>%
+    group_by(country, characteristic) %>%
+    summarise(
+      spearman_r  = round(cor(avg_rank_ref, avg_rank_comp,
+                              method = "spearman", use = "complete.obs"), 3),
+      n_stable    = sum(rank_direction == "stable"),
+      n_rank_up   = sum(rank_direction == "rank_up"),
+      n_rank_down = sum(rank_direction == "rank_down"),
+      .groups = "drop"
+    )
 
-cat("\n=== Rank correlation ref vs comparison period ===\n")
-print(rank_correlation, row.names = FALSE)
+  cat("\n=== Rank correlation ref vs comparison period ===\n")
+  print(rank_correlation, row.names = FALSE)
 
-saveRDS(rank_stability,   file.path(VOLUME_PATH, "analysis2_rank_stability.rds"))
-message("Saved: analysis2_rank_stability.rds")
+  saveRDS(rank_stability, file.path(VOLUME_PATH, "analysis2_rank_stability.rds"))
+  message("Saved: analysis2_rank_stability.rds")
+}
 
 
 # =============================================================================
@@ -327,12 +378,18 @@ summary_combined <- pct_change_all %>%
       select(country, characteristic, comp_p = p_value, comp_W = kendall_W,
              comp_sig = significant),
     by = c("country", "characteristic")
-  ) %>%
-  left_join(
-    rank_correlation %>%
-      select(country, characteristic, spearman_r),
-    by = c("country", "characteristic")
   )
+
+# Add Spearman rank correlation only if Step 3 ran (guarded above).
+if (exists("rank_correlation")) {
+  summary_combined <- summary_combined %>%
+    left_join(
+      rank_correlation %>% select(country, characteristic, spearman_r),
+      by = c("country", "characteristic")
+    )
+} else {
+  summary_combined$spearman_r <- NA_real_
+}
 
 saveRDS(summary_combined, file.path(VOLUME_PATH, "analysis2_summary.rds"))
 message("Saved: analysis2_summary.rds")

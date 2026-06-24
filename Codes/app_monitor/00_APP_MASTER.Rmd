@@ -1,0 +1,80 @@
+---
+title: "GWSC Drought ERA5 Monitor"
+output: html_document
+---
+
+```{r parameters}
+# ============================================================
+# USER PARAMETERS — edit this block only
+# ============================================================
+
+APP_COUNTRY   <- "Thailand"            # Country name matching ERA5 catalog `country` column
+APP_INDEX     <- "SPI"              # "SPI" | "SPEI-T" | "SPEI-P"
+APP_SCALE     <- 6                  # Accumulation period: 3 | 6 | 12
+APP_THRESHOLD <- -0.5               # Onset threshold: -0.5 | -1.0 | -1.5
+
+REF_START  <- 1973                  # Reference period start year
+REF_END    <- 2002                  # Reference period end year
+OBS_START  <- 2003                  # Observation period start year
+OBS_END    <- 2023                  # Observation period end year
+
+OUTPUT_DIR <- "/Volumes/projects/gwsc_drought/drought_outputs/app_outputs"
+```
+
+```{r setup, include=FALSE}
+# Internal — do not edit
+.prefix <- switch(APP_INDEX,
+  "SPI"    = "S",
+  "SPEI-T" = "ET",
+  "SPEI-P" = "EP",
+  stop(sprintf("Unknown APP_INDEX '%s'. Must be SPI, SPEI-T, or SPEI-P.", APP_INDEX))
+)
+
+APP_CONFIG_ID <- sprintf("%s%d-T-%03d",
+                         .prefix,
+                         APP_SCALE,
+                         round(abs(APP_THRESHOLD) * 100))
+
+.index_col <- switch(APP_INDEX,
+  "SPI"    = paste0("spi",  APP_SCALE),
+  "SPEI-T" = paste0("spei", APP_SCALE),
+  "SPEI-P" = paste0("spei", APP_SCALE, "_pm")
+)
+
+cat(sprintf("Config: %s | Country: %s | Ref: %d-%d | Obs: %d-%d\n",
+            APP_CONFIG_ID, APP_COUNTRY, REF_START, REF_END, OBS_START, OBS_END))
+```
+
+```{r boundary}
+script_dir <- "/Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes/app_monitor"
+# Downloads country boundary from Natural Earth and sets APP_SHAPEFILE_PATH.
+# GWSC pipeline integration: replace with carto shapefile path, skip this source().
+source(file.path(script_dir, "00_APP_Download_Boundary.R"))
+```
+
+```{r index-calculation}
+source(file.path(script_dir, "01_APP_Index_Calculation.R"))
+.idx_rows <- nrow(index_monthly)
+.idx_pixels <- length(unique(paste(index_monthly$x, index_monthly$y)))
+cat(sprintf("index_monthly rows: %d | pixels: %d\n", .idx_rows, .idx_pixels))
+writeLines(
+  sprintf("index_monthly rows: %d | pixels: %d", .idx_rows, .idx_pixels),
+  "/Volumes/projects/gwsc_drought/drought_outputs/app_outputs/app_diag_log.txt"
+)
+```
+
+```{r detection}
+source(file.path(script_dir, "02_APP_Detection.R"))
+.ref_rows <- nrow(events_ref)
+.obs_rows <- nrow(events_obs)
+cat(sprintf("events_ref rows: %d | events_obs rows: %d\n", .ref_rows, .obs_rows))
+write(
+  sprintf("events_ref rows: %d | events_obs rows: %d", .ref_rows, .obs_rows),
+  "/Volumes/projects/gwsc_drought/drought_outputs/app_outputs/app_diag_log.txt",
+  append = TRUE
+)
+```
+
+```{r output}
+source(file.path(script_dir, "03_APP_Output.R"))
+```
