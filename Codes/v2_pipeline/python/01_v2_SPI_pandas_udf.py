@@ -85,8 +85,29 @@ monthly_spark = (
     .filter(F.col("n_days_missing") < 5)
     .withColumnRenamed("lon_180",  "x")
     .withColumnRenamed("latitude", "y")
-    .withColumn("country", F.lit(COUNTRY_FILTER[0]))  # single country: assign directly
 )
+
+# -- Polygon clip: keep only pixels INSIDE the country boundary ----------------
+# The bbox above is a rectangle; it grabs ocean + neighbour-country cells that
+# would otherwise be mislabelled as this country. Clip the distinct pixel grid
+# to the boundary polygon on the driver (only ~hundreds of pixels), then keep
+# matching rows. Same gpd.sjoin(predicate="within") approach as 02a/02b so SPI
+# and SPEI share an identical pixel set. Country assigned from the spatial join.
+pixels = monthly_spark.select("x", "y").distinct().toPandas()
+pixels_gdf = gpd.GeoDataFrame(
+    pixels, geometry=gpd.points_from_xy(pixels["x"], pixels["y"]), crs=4326
+)
+joined = gpd.sjoin(pixels_gdf, boundaries_gdf[["COUNTRY", "geometry"]],
+                   how="left", predicate="within")
+pixels_with_country = (
+    joined[joined["COUNTRY"].notna()][["x", "y", "COUNTRY"]]
+    .rename(columns={"COUNTRY": "country"})
+    .drop_duplicates(subset=["x", "y"])
+)
+print(f"Polygon clip: {len(pixels_with_country)} of {len(pixels)} bbox pixels inside boundary")
+
+valid_sdf = spark.createDataFrame(pixels_with_country[["x", "y", "country"]])
+monthly_spark = monthly_spark.join(F.broadcast(valid_sdf), on=["x", "y"], how="inner")
 
 # Repartition by pixel for even UDF distribution
 n_par = spark.sparkContext.defaultParallelism * 2
