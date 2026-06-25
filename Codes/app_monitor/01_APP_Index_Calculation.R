@@ -38,13 +38,20 @@ USE_SPARK_APPLY <- FALSE
 sc <- spark_connect(method = "databricks")
 
 
-# -- Load country boundary shapefile ------------------------------------------
-# APP_SHAPEFILE_PATH set by 00_APP_Download_Boundary.R.
-# When integrating into GWSC pipeline: set APP_SHAPEFILE_PATH to carto
-# shapefile path on Volume and skip 00_APP_Download_Boundary.R entirely.
+# -- Load country boundary from esri table (v2-consistent) --------------------
+# Boundary comes from the same Databricks table v2 uses
+# (era5-daily-data.silver_staging.esri_worldcountryboundaries_global_silver),
+# read in-cluster as WKB — no shapefile download/upload, no run_app.ps1 step.
 sf::sf_use_s2(FALSE)  # disable s2 — avoids NULL from st_intersects on complex polygons
-boundary <- st_read(APP_SHAPEFILE_PATH, quiet = TRUE)
-boundary <- st_transform(boundary, crs = 4326)
+.bnd_raw <- tbl(sc, dbplyr::in_catalog(
+    "era5-daily-data", "silver_staging",
+    "esri_worldcountryboundaries_global_silver")) %>%
+  filter(COUNTRY == !!APP_COUNTRY) %>%
+  select(COUNTRY, chip_wkb) %>%
+  collect()
+if (nrow(.bnd_raw) == 0)
+  stop(sprintf("Country '%s' not found in esri boundary table.", APP_COUNTRY))
+boundary <- sf::st_as_sfc(.bnd_raw$chip_wkb, crs = 4326)
 boundary <- sf::st_make_valid(boundary)
 boundary <- sf::st_union(boundary)  # dissolve to single geometry, handles multi-feature
 
@@ -60,12 +67,12 @@ cat(sprintf("Shapefile bbox (with margin): lat [%.2f, %.2f], lon [%.2f, %.2f]\n"
 
 
 
-# -- ERA5 source: GWSC product table (same as Phase 1 pipeline) ---------------
-# projects.xx_drought_index.drought_index_dailysummary: daily, 0.25 deg,
-# covers 6 GWSC countries (Argentina, Benin, Thailand, Greece, Mexico, South Africa).
-# Columns: x, y, country, year, month, precip, mean_temp.
-# Switched from silver_staging.era5_daily_nn which is South/SE Asia only.
-era5 <- tbl(sc, in_catalog("projects", "xx_drought_index", "drought_index_dailysummary"))
+# -- ERA5 source: era5_daily_nn (v2-consistent) -------------------------------
+# Same raw ERA5 table the v2 pipeline uses: global, 0.25 deg, PET-matched grid,
+# 1950-2026. Columns: time, latitude, longitude (0-360), sum_tp_mm, mean_t2m_c.
+# No country column — pixels are selected by the boundary bbox above.
+era5 <- tbl(sc, dbplyr::in_catalog(
+  "era5-daily-data", "silver_staging", "era5_daily_nn"))
 
 
 # -- SPEI-Penman: check PET files exist before pulling data -------------------
@@ -83,10 +90,17 @@ if (APP_INDEX == "SPEI-P") {
 }
 
 
-# -- Step 1: country filter + daily->monthly aggregation in Spark -------------
-# Filter by country name (GWSC table already scoped to 6 countries).
-# Bbox pre-filter retained as partition pruning hint; exact polygon clip in R.
+# -- Step 1: bbox filter + daily->monthly aggregation in Spark ----------------
+# era5_daily_nn has longitude in 0-360 (convert to -180..180 to match boundary)
+# and no country column — the boundary bbox selects the pixels. Same monthly
+# aggregation as v2 (sum_tp_mm -> monthly_precip, mean_t2m_c -> mean_temp).
 monthly_spark <- era5 %>%
+  mutate(
+    x     = ifelse(longitude > 180, longitude - 360, longitude),
+    y     = latitude,
+    year  = year(time),
+    month = month(time)
+  ) %>%
   filter(
     x >= !!.lon_min, x <= !!.lon_max,
     y >= !!.lat_min, y <= !!.lat_max,
@@ -94,9 +108,9 @@ monthly_spark <- era5 %>%
   ) %>%
   group_by(x, y, year, month) %>%
   summarise(
-    monthly_precip    = sum(precip,     na.rm = TRUE),
-    mean_temp_monthly = mean(mean_temp, na.rm = TRUE),
-    n_days_missing    = sum(as.integer(is.na(precip))),
+    monthly_precip    = sum(sum_tp_mm,   na.rm = TRUE),
+    mean_temp_monthly = mean(mean_t2m_c, na.rm = TRUE),
+    n_days_missing    = sum(as.integer(is.na(sum_tp_mm))),
     .groups = "drop"
   ) %>%
   filter(n_days_missing < 5) %>%

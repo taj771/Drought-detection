@@ -8,7 +8,7 @@ output: html_document
 # USER PARAMETERS — edit this block only
 # ============================================================
 
-APP_COUNTRY   <- "Thailand"            # Country name matching ERA5 catalog `country` column
+APP_COUNTRY   <- "Benin"               # Country name matching ERA5 catalog `country` column
 APP_INDEX     <- "SPI"              # "SPI" | "SPEI-T" | "SPEI-P"
 APP_SCALE     <- 6                  # Accumulation period: 3 | 6 | 12
 APP_THRESHOLD <- -0.5               # Onset threshold: -0.5 | -1.0 | -1.5
@@ -47,9 +47,9 @@ cat(sprintf("Config: %s | Country: %s | Ref: %d-%d | Obs: %d-%d\n",
 
 ```{r boundary}
 script_dir <- "/Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes/app_monitor"
-# Downloads country boundary from Natural Earth and sets APP_SHAPEFILE_PATH.
-# GWSC pipeline integration: replace with carto shapefile path, skip this source().
-source(file.path(script_dir, "00_APP_Download_Boundary.R"))
+# Boundary now read in-cluster from the esri table inside 01_APP_Index_Calculation.R
+# (v2-consistent) — no shapefile download/upload, so 00_APP_Download_Boundary.R is
+# bypassed. Kept on disk for the legacy shapefile-on-Volume integration path.
 ```
 
 ```{r index-calculation}
