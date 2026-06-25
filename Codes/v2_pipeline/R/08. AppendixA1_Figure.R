@@ -27,9 +27,10 @@ library(arrow)   # read v2 .parquet inputs
 VOLUME_PATH  <- "/Volumes/projects/gwsc_drought/drought_outputs/v2"
 FIGURES_PATH <- file.path(VOLUME_PATH, "Figures")
 
-# Benin pixel (v2 = Benin only; old default x=100 was Thailand from v1).
+# Benin pixel inside the clipped boundary (post polygon-clip; y=6.375 was a
+# bbox-corner cell removed by the clip fix).
 TARGET_X     <- 0.875
-TARGET_Y     <- 6.375
+TARGET_Y     <- 10.375
 TARGET_INDEX <- "spi6"
 TARGET_METHOD <- "threshold"
 TARGET_THR   <- 0.0
