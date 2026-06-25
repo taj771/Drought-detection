@@ -89,29 +89,31 @@ pct_severity <- pct_change(s_ref$severity,   s_obs$severity, flip_sign = TRUE)
 pct_pixels   <- pct_change(s_ref$pct_pixels, s_obs$pct_pixels)
 
 
-# -- Build output row ---------------------------------------------------------
-output_row <- data.frame(
-  country               = APP_COUNTRY,
-  config_id             = APP_CONFIG_ID,
-  index                 = APP_INDEX,
-  scale                 = APP_SCALE,
-  threshold             = APP_THRESHOLD,
-  ref_period            = paste0(REF_START, "-", REF_END),
-  obs_period            = paste0(OBS_START, "-", OBS_END),
-  ref_freq              = s_ref$freq,
-  ref_duration          = s_ref$duration,
-  ref_severity          = s_ref$severity,
-  ref_pct_pixels        = s_ref$pct_pixels,
-  obs_freq              = s_obs$freq,
-  obs_duration          = s_obs$duration,
-  obs_severity          = s_obs$severity,
-  obs_pct_pixels        = s_obs$pct_pixels,
-  pct_change_freq       = pct_freq,
-  pct_change_duration   = pct_duration,
-  pct_change_severity   = pct_severity,
-  pct_change_pct_pixels = pct_pixels,
-  run_date              = Sys.Date(),
-  stringsAsFactors      = FALSE
+# -- Build LONG output table --------------------------------------------------
+# One row per drought characteristic; Reference / Observation as separate
+# columns plus % change. Human-readable (vs the old wide single-row format).
+output_table <- data.frame(
+  characteristic = c("Frequency (events/pixel/yr)",
+                     "Duration (months)",
+                     "Peak severity (index)",
+                     "Pixels affected (%)"),
+  reference      = c(s_ref$freq, s_ref$duration, s_ref$severity, s_ref$pct_pixels),
+  observation    = c(s_obs$freq, s_obs$duration, s_obs$severity, s_obs$pct_pixels),
+  pct_change     = c(pct_freq, pct_duration, pct_severity, pct_pixels),
+  stringsAsFactors = FALSE
+)
+
+# Context columns repeated as attributes / header rows for the CSV
+meta <- data.frame(
+  country    = APP_COUNTRY,
+  config_id  = APP_CONFIG_ID,
+  index      = APP_INDEX,
+  scale      = APP_SCALE,
+  threshold  = APP_THRESHOLD,
+  ref_period = paste0(REF_START, "-", REF_END),
+  obs_period = paste0(OBS_START, "-", OBS_END),
+  run_date   = as.character(Sys.Date()),
+  stringsAsFactors = FALSE
 )
 
 
@@ -135,7 +137,7 @@ cat(sprintf("%-22s %10.1f%% %10.1f%% %10.1f%%\n",
             "% Pixels affected",  s_ref$pct_pixels, s_obs$pct_pixels, pct_pixels))
 
 
-# -- Write CSV ----------------------------------------------------------------
+# -- Write CSV (long table) ---------------------------------------------------
 dir.create(OUTPUT_DIR, showWarnings = FALSE, recursive = TRUE)
 
 out_file <- file.path(
@@ -146,5 +148,15 @@ out_file <- file.path(
           format(Sys.Date(), "%Y%m%d"))
 )
 
-write.csv(output_row, out_file, row.names = FALSE)
+# Prepend the run context as comment header lines, then the long table.
+meta_lines <- paste0("# ", names(meta), ": ", as.character(meta[1, ]))
+writeLines(meta_lines, out_file)
+suppressWarnings(
+  write.table(output_table, out_file, sep = ",", row.names = FALSE,
+              append = TRUE, col.names = TRUE, quote = FALSE)
+)
 cat(sprintf("\nOutput written: %s\n", out_file))
+
+# Expose for the visuals script (04_APP_Visuals.R)
+app_summary_table <- output_table
+app_summary_meta  <- meta

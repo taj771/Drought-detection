@@ -5,18 +5,19 @@ bundle:
   name: Drought-indices
 
 sync:
+  # Only the live code is synced to the workspace. Reports, _archive, v1 (kept
+  # in git for reference, not run), and large binaries stay local to keep the
+  # bundle deploy small and fast.
   include:
     - "Codes/app_monitor/**"
-    # v2 pipeline (live) — Python pandas_udf + R stats + runners + init
     - "Codes/v2_pipeline/**"
-    # v1 pipeline (R single-cluster) — kept for reference
-    - "Codes/v1_R_single_cluster/**"
     - "Codes/PET_data_prep/**"
     - "databricks.yml"
   exclude:
-    - ".Rproj.user/**"
-    - ".Rproj.user/"
     - "**/.Rproj.user/**"
+    - "Codes/_archive/**"
+    - "Codes/reports/**"
+    - "Codes/old/**"
     - "Drought Calculation*/**"
     - "*_files/**"
     - "**/*_files/**"
