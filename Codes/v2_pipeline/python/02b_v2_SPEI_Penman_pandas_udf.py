@@ -11,9 +11,9 @@
 # -- USER SETTINGS ------------------------------------------------------------
 COUNTRY_FILTER  = ["Benin"]
 ERA5_YEAR_START = 1950
-ERA5_YEAR_END   = 2023   # PET (ERA5-Land) ends 2023; inner-join caps SPEI-P here
-PET_DIR         = "/Volumes/projects/gwsc_drought/drought_outputs/pet_clipped/"
-# PET start/end now parsed per-file from filename (1950_1969 + 1970_2023).
+ERA5_YEAR_END   = 2023   # CRU PET runs 1901-2023; inner-join caps SPEI-P here
+# PET now = CRU TS 4.08 Penman-Monteith, staged as parquet on the Volume
+# (see CRU_PET_PARQUET below). Old ERA5-Land pev NC dir retired (was wrong).
 VOLUME_PATH     = "/Volumes/projects/gwsc_drought/drought_outputs/v2"
 # -----------------------------------------------------------------------------
 
@@ -117,55 +117,27 @@ monthly_clipped = monthly_df.merge(pixels_with_country, on=["x", "y"], how="inne
 print(f"Rows after clip: {len(monthly_clipped):,}")
 
 
-# -- Load Penman-Monteith PET from NC files (driver) -------------------------
-def load_pet_nc(nc_path):
-    # GDAL-style NC: each month is a separate data variable Band1..BandN
-    # (N = n_years * 12), each with dims (lat, lon). No time/band dimension.
-    # A non-Band "crs" variable is present and must be skipped.
-    # Start year parsed from filename (..._<startYear>_<endYear>_era5grid...),
-    # so 1950_1969 and 1970_2023 files are dated correctly in one run.
-    import re
-    m = re.search(r"_(\d{4})_(\d{4})_era5grid", os.path.basename(nc_path))
-    start_year = int(m.group(1))
-    ds = xr.open_dataset(nc_path)
-    band_vars = [v for v in ds.data_vars if str(v).startswith("Band")]
-    # Band order = chronological from start_year; sort numerically by index.
-    band_vars = sorted(band_vars, key=lambda v: int(str(v).replace("Band", "")))
-    dates = pd.date_range(f"{start_year}-01-01", periods=len(band_vars), freq="MS")
-    df_list = []
-    for dt, var_name in zip(dates, band_vars):
-        layer = ds[var_name]
-        df_i = layer.to_dataframe(name="pet_mm").reset_index()
-        # handle lat/lon naming variations -> x/y
-        if "longitude" in df_i.columns: df_i = df_i.rename(columns={"longitude": "x", "latitude": "y"})
-        if "lon" in df_i.columns:       df_i = df_i.rename(columns={"lon": "x", "lat": "y"})
-        df_i["year"]  = dt.year
-        df_i["month"] = dt.month
-        df_i = df_i[["x", "y", "year", "month", "pet_mm"]].dropna()
-        df_list.append(df_i)
-    ds.close()
-    return pd.concat(df_list, ignore_index=True)
-
-# Per-country PET files, two eras concatenated for full 1950-2023 coverage:
-#   era5land_pet_<Country>_1950_1969_era5grid_clipped.nc
-#   era5land_pet_<Country>_1970_2023_era5grid_clipped.nc
-# Filter to the run's countries (underscores in multi-word names, e.g. South_Africa).
-_country_tokens = [c.replace(" ", "_") for c in COUNTRY_FILTER]
-pet_files = [os.path.join(PET_DIR, f) for f in os.listdir(PET_DIR)
-             if f.endswith("_era5grid_clipped.nc")
-             and any(f"_pet_{tok}_" in f for tok in _country_tokens)]
-if not pet_files:
-    raise FileNotFoundError(
-        f"No PET NC files for {COUNTRY_FILTER} in {PET_DIR}")
-
-print(f"Loading PET from {len(pet_files)} NC file(s): "
-      f"{[os.path.basename(f) for f in pet_files]}")
-pet_df = pd.concat([load_pet_nc(f) for f in pet_files], ignore_index=True)
-# Two eras may overlap at a boundary month — keep one row per pixel-month.
+# -- Load Penman-Monteith PET (CRU TS 4.08) ----------------------------------
+# CORRECTED 2026-07: the old ERA5-Land `pev` files were WRONG for SPEI —
+# ERA5-Land pev is open-water/pan evaporation (not FAO reference ETo) AND the
+# metres->mm conversion dropped the ×days_in_month factor, giving Benin PET of
+# ~200-400 mm/yr instead of ~1300-1600. Replaced with CRU TS 4.08 PET, which is
+# a genuine Penman-Monteith reference PET (temp + vapour pressure + cloud + wind
+# climatology; Harris et al. 2020, Sci Data), monthly, 1901-2023.
+#
+# PET is pre-clipped/aggregated to the ERA5 154-px grid (mm/month) by the local
+# script Codes/pdsi_validation/P1_cru_pet_download_clip.py and staged as a
+# parquet on the Volume. Columns: x, y, year, month, pet_mm.
+CRU_PET_PARQUET = os.path.join(VOLUME_PATH, "cru_pet_benin_monthly.parquet")
+print(f"Loading CRU Penman-Monteith PET: {CRU_PET_PARQUET}")
+pet_df = pd.read_parquet(CRU_PET_PARQUET)[["x", "y", "year", "month", "pet_mm"]]
 pet_df = pet_df.drop_duplicates(subset=["x", "y", "year", "month"])
 pet_df["x"] = pet_df["x"].round(4)
 pet_df["y"] = pet_df["y"].round(4)
-print(f"PET loaded: {len(pet_df):,} rows")
+print(f"PET loaded: {len(pet_df):,} rows, "
+      f"{pet_df[['x','y']].drop_duplicates().shape[0]} pixels, "
+      f"{pet_df.year.min()}-{pet_df.year.max()}, "
+      f"mean {pet_df.pet_mm.mean():.1f} mm/mo")
 
 
 # -- Join PET to clipped ERA5 (driver) ----------------------------------------
