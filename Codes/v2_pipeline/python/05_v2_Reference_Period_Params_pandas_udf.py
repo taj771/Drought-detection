@@ -28,12 +28,31 @@
 # =============================================================================
 
 # -- USER SETTINGS ------------------------------------------------------------
-COUNTRY_FILTER = ["Benin"]      # all 6 for production
+# COUNTRY is injected by the runner (_run_py_step) from the job parameter, so
+# every task in a run agrees. Falls back to Benin for standalone/notebook use.
+COUNTRY_TAG    = globals().get("COUNTRY", "Benin")
+COUNTRY_FILTER = [COUNTRY_TAG]   # one country per run
 CALIB_START    = 1973
 CALIB_END      = 2002
 SCALES         = [1, 3, 6, 12]
-VOLUME_PATH    = "/Volumes/projects/gwsc_drought/drought_outputs/v2"
+# Per-country output dir: filenames stay identical across countries, so runs for
+# different countries never collide and downstream scripts need no rename logic.
+VOLUME_PATH    = f"/Volumes/projects/gwsc_drought/drought_outputs/v2/{COUNTRY_TAG}"
 # -----------------------------------------------------------------------------
+
+# Self-install rather than rely on cluster libraries: a cluster rebuild drops
+# every attached library, and this script then fails at import. Same block as
+# 01/02a/02b so all steps have identical dependency handling.
+import subprocess, sys
+
+def pip_install(pkg):
+    subprocess.check_call([sys.executable, "-m", "pip", "install", pkg, "-q"])
+
+for pkg in ["climate-indices"]:
+    try:
+        __import__(pkg.replace("-", "_"))
+    except ImportError:
+        pip_install(pkg)
 
 from pyspark.sql import SparkSession
 spark = SparkSession.builder.getOrCreate()

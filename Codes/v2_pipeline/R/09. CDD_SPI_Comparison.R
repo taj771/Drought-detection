@@ -37,8 +37,14 @@ library(arrow)   # read v2 .parquet inputs
 
 
 # -- Configuration ------------------------------------------------------------
-# v2 pipeline writes .parquet to drought_outputs/v2.
-VOLUME_PATH    <- "/Volumes/projects/gwsc_drought/drought_outputs/v2"
+# v2 pipeline writes .parquet to drought_outputs/v2/<country>. The runner
+# (_run_r_step) sets VOLUME_PATH from the COUNTRY job parameter; the fallback
+# below only applies when this script is run standalone.
+if (!exists("VOLUME_PATH")) {
+  COUNTRY_TAG <- if (exists("COUNTRY_TAG")) COUNTRY_TAG else "Benin"
+  VOLUME_PATH <- file.path("/Volumes/projects/gwsc_drought/drought_outputs/v2",
+                           COUNTRY_TAG)
+}
 ERA5_CATALOG   <- "projects.xx_drought_index.drought_index_dailysummary"
 CDD_MIN_LENGTH <- 7       # minimum consecutive dry days to count as event
 DRY_THRESHOLD  <- 1       # mm/day; <= this = dry day
@@ -46,8 +52,10 @@ REF_START      <- 1973
 REF_END        <- 2002
 P_THRESHOLD    <- 0.05
 
-# v2 detection = Benin only; match it so the CDD↔SPI join has pixels on both sides.
-COUNTRIES <- c("Benin")
+# v2 runs one country at a time; match it so the CDD<->SPI join has pixels on
+# both sides. COUNTRY_TAG comes from the runner (or the fallback above).
+if (!exists("COUNTRY_TAG")) COUNTRY_TAG <- "Benin"
+COUNTRIES <- c(COUNTRY_TAG)
 
 
 # -- Spark connection ---------------------------------------------------------

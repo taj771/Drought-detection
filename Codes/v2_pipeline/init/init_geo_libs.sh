@@ -43,10 +43,34 @@ Rscript -e '
     try(remotes::install_version("terra", version="1.7-78", repos=repo, upgrade="never"))
   log("terra:", requireNamespace("terra", quietly=TRUE))
 
-  # 2) units (rnaturalearth dep, compiles vs udunits2). rnaturalearth itself is
-  #    NOT installed here — at boot the Rscript dies before finishing it; it is
-  #    bootstrapped on the driver in script 04 instead, where it builds cleanly.
-  if (!requireNamespace("units", quietly=TRUE)) try(install.packages("units", repos=repo))
+  # 2) units (rnaturalearth + sf dep, compiles vs udunits2).
+  #    Pinned: units >= 0.9 requires Rcpp >= 1.1.0, but this image ships Rcpp
+  #    1.0.13. units 0.8-5 is the last release that builds against 1.0.13.
+  #    Same failure mode as the terra pin above.
+  if (!requireNamespace("units", quietly=TRUE))
+    try(remotes::install_version("units", version="0.8-5", repos=repo, upgrade="never"))
   log("units:", requireNamespace("units", quietly=TRUE))
+
+  # 3) Remaining R packages needed by the v2 R steps (04, 06-09). These must be
+  #    installed HERE rather than as cluster libraries: the cluster library
+  #    installer resolves against CRAN latest and re-resolves dependencies, which
+  #    drags in units/Rcpp versions this image cannot build (ERROR_USER_R_INSTALLATION).
+  #    PPM serves prebuilt binaries for this image, so these are fast and safe.
+  # patchwork: pinned for the same reason as terra/units, and installed FIRST.
+  # patchwork >= 1.3.x calls ggplot2::is_ggplot(), which only exists in
+  # ggplot2 >= 3.5.2; this image ships an older ggplot2, so the install dies at
+  # lazy-load with an error about is_ggplot not being exported by ggplot2.
+  # 1.2.0 is the last release that builds against the ggplot2 in this image.
+  # It must go in before the loop below: packages there pull patchwork in as a
+  # dependency and would fetch the broken latest version first.
+  if (!requireNamespace("patchwork", quietly=TRUE))
+    try(remotes::install_version("patchwork", version="1.2.0", repos=repo, upgrade="never"))
+  log("patchwork:", requireNamespace("patchwork", quietly=TRUE))
+
+  for (p in c("sf", "SPEI", "rnaturalearthdata", "rnaturalearth")) {
+    if (!requireNamespace(p, quietly=TRUE))
+      try(install.packages(p, repos=repo, upgrade="never"))
+    log(paste0(p, ":"), requireNamespace(p, quietly=TRUE))
+  }
 ' || true
 set -e

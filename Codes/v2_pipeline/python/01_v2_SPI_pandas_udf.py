@@ -9,18 +9,37 @@
 #              GWSC product pipeline ERA5 source, 1950-2026, PET-matched grid)
 # SPI method: climate-indices package (gamma distribution, matches R SPEI pkg)
 #
-# Requires cluster libraries: climate-indices, geopandas
+# Requires: climate-indices, geopandas — pip-installed below if absent.
 #
 # Output: spi_results.parquet in VOLUME_PATH
 #   Read in R scripts 03+: arrow::read_parquet("...spi_results.parquet")
 # =============================================================================
 
 # -- USER SETTINGS ------------------------------------------------------------
-COUNTRY_FILTER  = ["Benin"]   # change to all 6 for production run
+# COUNTRY is injected by the runner (_run_py_step) from the job parameter, so
+# every task in a run agrees. Falls back to Benin for standalone/notebook use.
+COUNTRY_TAG     = globals().get("COUNTRY", "Benin")
+COUNTRY_FILTER  = [COUNTRY_TAG]   # one country per run
 ERA5_YEAR_START = 1950
 ERA5_YEAR_END   = 2023
-VOLUME_PATH     = "/Volumes/projects/gwsc_drought/drought_outputs/v2"
+# Per-country output dir: filenames stay identical across countries, so runs for
+# different countries never collide and downstream scripts need no rename logic.
+VOLUME_PATH     = f"/Volumes/projects/gwsc_drought/drought_outputs/v2/{COUNTRY_TAG}"
 # -----------------------------------------------------------------------------
+
+# Self-install rather than rely on cluster libraries: a cluster rebuild drops
+# every attached library, and this script then fails at import. Same block as
+# 02a/02b so all three steps have identical dependency handling.
+import subprocess, sys
+
+def pip_install(pkg):
+    subprocess.check_call([sys.executable, "-m", "pip", "install", pkg, "-q"])
+
+for pkg in ["climate-indices", "geopandas"]:
+    try:
+        __import__(pkg.replace("-", "_"))
+    except ImportError:
+        pip_install(pkg)
 
 from pyspark.sql import SparkSession
 spark = SparkSession.builder.getOrCreate()

@@ -22,14 +22,20 @@
 # =============================================================================
 
 # -- USER SETTINGS ------------------------------------------------------------
-COUNTRY_FILTER   = ["Benin"]     # set to all 6 for production
 YEAR_FROM        = 1970
 YEAR_TO          = 2023
 REF_START        = 1973          # reference period (frozen params)
 REF_END          = 2002
 START_THRESHOLDS = [0.0, -0.25, -0.5, -1.0, -1.5]   # all 5 — do not remove
 MIN_DURATION     = 1
-VOLUME_PATH      = "/Volumes/projects/gwsc_drought/drought_outputs/v2"
+# COUNTRY is injected by the runner (_run_py_step) from the job parameter, so
+# this always matches the 01/02a/02b output it reads. Falls back to Benin for
+# standalone/notebook use.
+COUNTRY_TAG      = globals().get("COUNTRY", "Benin")
+COUNTRY_FILTER   = [COUNTRY_TAG]   # one country per run; follows the job parameter
+# Per-country dir. Note detection_tmp/ now lives under it, so the config-id cache
+# can no longer be reused across countries by accident.
+VOLUME_PATH      = f"/Volumes/projects/gwsc_drought/drought_outputs/v2/{COUNTRY_TAG}"
 # -----------------------------------------------------------------------------
 
 from pyspark.sql import SparkSession

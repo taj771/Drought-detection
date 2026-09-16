@@ -1,24 +1,31 @@
 # =============================================================================
-# P1. Download CRU TS4.08 PET (FAO-56 Penman-Monteith), clip Benin, monthly.
+# P1. Download CRU TS4.08 PET (FAO-56 Penman-Monteith), clip a country, monthly.
 # =============================================================================
 # Fixes the broken v2 SPEI-Penman PET. CRU TS pet = FAO-56 Penman-Monteith
 # reference PET, monthly, 0.5 deg, 1901-2023 (Harris et al. 2020, Sci Data).
-# ONE global gzipped NetCDF for the whole period -> download once, clip Benin,
-# aggregate to the 154 ERA5 pixels, write parquet for SPEI-P recompute.
+# ONE global gzipped NetCDF for the whole period -> download once, clip the
+# country, aggregate to its ERA5 pixels, write parquet for SPEI-P recompute.
+#
+# ADDING A COUNTRY: put its ERA5 pixel list at Data/cru_pet/era5_pixels_<lc>.csv
+# (columns x,y) and set COUNTRY below. The clip window is derived from that file,
+# so nothing else needs editing. The global download is cached and reused.
 #
 # LOCAL run with `py -3.13`. Needs a CEDA access token (Bearer) — set env var
 # CEDA_TOKEN before running:  $env:CEDA_TOKEN = "eyJ..."
 #
 # In : CEDA archive cru_ts4.08 pet global .nc.gz
-# Out: Data/cru_pet/cru_pet_benin_monthly.parquet  (x,y,year,month,pet_mm on 154 px)
+#      Data/cru_pet/era5_pixels_<country>.csv
+# Out: Data/cru_pet/cru_pet_<country>_monthly.parquet  (x,y,year,month,pet_mm)
 #      + raw global file cached in Data/cru_pet/ (gitignored, large-ish)
 # =============================================================================
 import os, gzip, shutil, urllib.request, sys
 import numpy as np, pandas as pd, xarray as xr
 
+# -- USER SETTING -------------------------------------------------------------
+COUNTRY = os.environ.get("COUNTRY", "Eritrea")
+# -----------------------------------------------------------------------------
+
 TOKEN = os.environ.get("CEDA_TOKEN", "").strip()
-if not TOKEN:
-    sys.exit("Set CEDA_TOKEN env var first: $env:CEDA_TOKEN = 'eyJ...'")
 
 BASE = "https://dap.ceda.ac.uk/badc/cru/data/cru_ts/cru_ts_4.08/data/pet"
 FN   = "cru_ts4.08.1901.2023.pet.dat.nc.gz"
@@ -26,16 +33,34 @@ URL  = f"{BASE}/{FN}"
 OUTD = "Data/cru_pet"; os.makedirs(OUTD, exist_ok=True)
 GZ   = os.path.join(OUTD, FN)
 NC   = GZ[:-3]
-PX   = "Codes/ndvi_validation/era5_pixels_benin.csv"   # 154 ERA5 px (x,y)
-OUT  = os.path.join(OUTD, "cru_pet_benin_monthly.parquet")
+LC   = COUNTRY.lower().replace(" ", "_")
+# Benin's list predates this script and lives with the NDVI work; later countries
+# get theirs in Data/cru_pet/. Accept either location.
+PX_CANDIDATES = [
+    os.path.join(OUTD, f"era5_pixels_{LC}.csv"),
+    f"Codes/ndvi_validation/era5_pixels_{LC}.csv",
+]
+PX = next((p for p in PX_CANDIDATES if os.path.exists(p)), None)
+if PX is None:
+    sys.exit(f"No ERA5 pixel list for {COUNTRY}. Looked in: {PX_CANDIDATES}")
+OUT  = os.path.join(OUTD, f"cru_pet_{LC}_monthly.parquet")
 
-# Benin window + ERA5 grid
-LON0, LON1, LAT0, LAT1 = 0.5, 4.0, 6.0, 13.0
+# Clip window derived from the pixel list, padded by one CRU cell (0.5 deg) so
+# every ERA5 pixel has CRU neighbours to draw from at the country edge.
 HALF = 0.125
+_px_bb = pd.read_csv(PX)
+LON0, LON1 = _px_bb.x.min() - 0.5, _px_bb.x.max() + 0.5
+LAT0, LAT1 = _px_bb.y.min() - 0.5, _px_bb.y.max() + 0.5
+print(f"{COUNTRY}: {len(_px_bb)} ERA5 px | window "
+      f"lon [{LON0:.2f}, {LON1:.2f}] lat [{LAT0:.2f}, {LAT1:.2f}]")
 
 # --- 1. download (Bearer token) ---------------------------------------------
 if not os.path.exists(NC):
     if not os.path.exists(GZ):
+        # Token only matters here. The global file is one download for ALL
+        # countries, so once it is cached later countries need no credential.
+        if not TOKEN:
+            sys.exit("Set CEDA_TOKEN env var first: $env:CEDA_TOKEN = 'eyJ...'")
         print("downloading CRU pet (global, whole period)...")
         req = urllib.request.Request(URL, headers={"Authorization": f"Bearer {TOKEN}"})
         with urllib.request.urlopen(req, timeout=600) as r, open(GZ, "wb") as f:
@@ -67,9 +92,9 @@ if str(ds[pv].attrs.get("units","")).lower() in ("mm/day","mm day-1","mm day^-1"
 else:
     df["pet_mm"] = df["pet"]     # already monthly total (verify from magnitude below)
 ds.close()
-print(f"CRU cells in Benin window: {df[['lon','lat']].drop_duplicates().shape[0]}")
-print(f"pet_mm sample (Benin): mean {df['pet_mm'].mean():.1f} mm/mo "
-      f"(expect ~100-160; Benin ~1500-1800/yr)")
+print(f"CRU cells in {COUNTRY} window: {df[['lon','lat']].drop_duplicates().shape[0]}")
+print(f"pet_mm sample ({COUNTRY}): mean {df['pet_mm'].mean():.1f} mm/mo "
+      f"(sub-humid ~100-160/mo; arid higher)")
 
 # --- 3. aggregate CRU 0.5deg -> ERA5 154 px (mean of CRU cells in each 0.25 box)
 px = pd.read_csv(PX)
@@ -90,5 +115,10 @@ out.to_parquet(OUT, index=False)
 print(f"\nwrote {OUT}: {len(out)} rows, {out[['x','y']].drop_duplicates().shape[0]} px, "
       f"{out.year.min()}-{out.year.max()}")
 ann = out[(out.x==out.x.iloc[0])&(out.y==out.y.iloc[0])&(out.year==2000)]["pet_mm"].sum()
-print(f"one-pixel 2000 annual PET: {ann:.0f} mm/yr  (Benin expect ~1500-1800)")
+print(f"one-pixel 2000 annual PET: {ann:.0f} mm/yr")
+# Sanity gate: PET must separate climates. Benin (sub-humid) ~1500-1800 mm/yr;
+# an arid country should land well above that. If an arid country returns a
+# Benin-like number, the clip or the nearest-cell join is wrong — stop, do not
+# feed it to 02b.
+print("  expect: sub-humid ~1500-1800 | arid ~1800-2500")
 print("P1 done.")

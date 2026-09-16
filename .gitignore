@@ -45,3 +45,12 @@ COMP_START
 120)
 24
 50)
+
+# Agent/tooling state
+.hive-mind/
+
+# Shiny deployment state
+rsconnect/
+
+# Diagnostics dumps
+diagnostics.txt

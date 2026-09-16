@@ -23,12 +23,23 @@ library(arrow)   # read v2 .parquet inputs
 
 
 # -- Configuration ------------------------------------------------------------
-# v2 pipeline writes .parquet to drought_outputs/v2.
-VOLUME_PATH  <- "/Volumes/projects/gwsc_drought/drought_outputs/v2"
+# v2 pipeline writes .parquet to drought_outputs/v2/<country>. The runner
+# (_run_r_step) sets VOLUME_PATH from the COUNTRY job parameter; the fallback
+# below only applies when this script is run standalone.
+if (!exists("VOLUME_PATH")) {
+  COUNTRY_TAG <- if (exists("COUNTRY_TAG")) COUNTRY_TAG else "Benin"
+  VOLUME_PATH <- file.path("/Volumes/projects/gwsc_drought/drought_outputs/v2",
+                           COUNTRY_TAG)
+}
 FIGURES_PATH <- file.path(VOLUME_PATH, "Figures")
 
 # Benin pixel inside the clipped boundary (post polygon-clip; y=6.375 was a
 # bbox-corner cell removed by the clip fix).
+#
+# NOTE: these coordinates are Benin-specific. This appendix figure is not part
+# of the routine run, so the pixel is left hardcoded. To run 08 for another
+# country, pick a pixel inside that country and set TARGET_X/TARGET_Y here --
+# otherwise the filter matches nothing and the figure comes out empty.
 TARGET_X     <- 0.875
 TARGET_Y     <- 10.375
 TARGET_INDEX <- "spi6"

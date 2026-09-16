@@ -9,10 +9,15 @@
 # =============================================================================
 
 # -- USER SETTINGS ------------------------------------------------------------
-COUNTRY_FILTER  = ["Benin"]
+# COUNTRY is injected by the runner (_run_py_step) from the job parameter, so
+# every task in a run agrees. Falls back to Benin for standalone/notebook use.
+COUNTRY_TAG     = globals().get("COUNTRY", "Benin")
+COUNTRY_FILTER  = [COUNTRY_TAG]   # one country per run
 ERA5_YEAR_START = 1950
 ERA5_YEAR_END   = 2023
-VOLUME_PATH     = "/Volumes/projects/gwsc_drought/drought_outputs/v2"
+# Per-country output dir: filenames stay identical across countries, so runs for
+# different countries never collide and downstream scripts need no rename logic.
+VOLUME_PATH     = f"/Volumes/projects/gwsc_drought/drought_outputs/v2/{COUNTRY_TAG}"
 # -----------------------------------------------------------------------------
 
 import subprocess, sys

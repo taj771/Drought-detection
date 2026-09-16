@@ -9,12 +9,17 @@
 # =============================================================================
 
 # -- USER SETTINGS ------------------------------------------------------------
-COUNTRY_FILTER  = ["Benin"]
+# COUNTRY is injected by the runner (_run_py_step) from the job parameter, so
+# every task in a run agrees. Falls back to Benin for standalone/notebook use.
+COUNTRY_TAG     = globals().get("COUNTRY", "Benin")
+COUNTRY_FILTER  = [COUNTRY_TAG]   # one country per run
 ERA5_YEAR_START = 1950
 ERA5_YEAR_END   = 2023   # CRU PET runs 1901-2023; inner-join caps SPEI-P here
 # PET now = CRU TS 4.08 Penman-Monteith, staged as parquet on the Volume
 # (see CRU_PET_PARQUET below). Old ERA5-Land pev NC dir retired (was wrong).
-VOLUME_PATH     = "/Volumes/projects/gwsc_drought/drought_outputs/v2"
+# Per-country output dir: filenames stay identical across countries, so runs for
+# different countries never collide and downstream scripts need no rename logic.
+VOLUME_PATH     = f"/Volumes/projects/gwsc_drought/drought_outputs/v2/{COUNTRY_TAG}"
 # -----------------------------------------------------------------------------
 
 import subprocess, sys
@@ -125,10 +130,12 @@ print(f"Rows after clip: {len(monthly_clipped):,}")
 # a genuine Penman-Monteith reference PET (temp + vapour pressure + cloud + wind
 # climatology; Harris et al. 2020, Sci Data), monthly, 1901-2023.
 #
-# PET is pre-clipped/aggregated to the ERA5 154-px grid (mm/month) by the local
-# script Codes/pdsi_validation/P1_cru_pet_download_clip.py and staged as a
+# PET is pre-clipped/aggregated to this country's ERA5 grid (mm/month) by the
+# local script Codes/pdsi_validation/P1_cru_pet_download_clip.py and staged as a
 # parquet on the Volume. Columns: x, y, year, month, pet_mm.
-CRU_PET_PARQUET = os.path.join(VOLUME_PATH, "cru_pet_benin_monthly.parquet")
+# The country lives in the directory (VOLUME_PATH), not the filename, so each
+# country's PET sits beside its own outputs under the same name.
+CRU_PET_PARQUET = os.path.join(VOLUME_PATH, "cru_pet_monthly.parquet")
 print(f"Loading CRU Penman-Monteith PET: {CRU_PET_PARQUET}")
 pet_df = pd.read_parquet(CRU_PET_PARQUET)[["x", "y", "year", "month", "pet_mm"]]
 pet_df = pet_df.drop_duplicates(subset=["x", "y", "year", "month"])

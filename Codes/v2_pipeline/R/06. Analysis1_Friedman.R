@@ -39,9 +39,13 @@ library(arrow)   # read v2 .parquet inputs
 
 
 # -- Configuration ------------------------------------------------------------
-# v2 pipeline writes .parquet to drought_outputs/v2. Caller can override.
+# v2 pipeline writes .parquet to drought_outputs/v2/<country>. The runner
+# (_run_r_step) sets VOLUME_PATH from the COUNTRY job parameter; the fallback
+# below only applies when this script is run standalone.
 if (!exists("VOLUME_PATH")) {
-  VOLUME_PATH <- "/Volumes/projects/gwsc_drought/drought_outputs/v2"
+  COUNTRY_TAG <- if (exists("COUNTRY_TAG")) COUNTRY_TAG else "Benin"
+  VOLUME_PATH <- file.path("/Volumes/projects/gwsc_drought/drought_outputs/v2",
+                           COUNTRY_TAG)
 }
 REF_START    <- 1973
 REF_END      <- 2002

@@ -12,9 +12,14 @@
 RUN_SPI    = False  # 01_v2_SPI_pandas_udf.py (done)
 RUN_SPEI_T = True   # 02a_v2_SPEI_Thornthwaite_pandas_udf.py
 RUN_SPEI_P = True   # 02b_v2_SPEI_Penman_pandas_udf.py
+
+# Country for this run. Injected if a caller supplies it; otherwise edit here.
+# Passed into every script below, so they cannot silently fall back to their own
+# default while you think you are running another country.
+COUNTRY    = globals().get("COUNTRY", "Benin")
 # -----------------------------------------------------------------------------
 
-VOLUME_PATH = "/Volumes/projects/gwsc_drought/drought_outputs/v2"
+VOLUME_PATH = f"/Volumes/projects/gwsc_drought/drought_outputs/v2/{COUNTRY}"
 
 from pyspark.sql import SparkSession
 spark = SparkSession.builder.getOrCreate()
@@ -32,7 +37,7 @@ def run_script(path):
     t0 = time.time()
     with open(path) as f:
         code = f.read()
-    exec(compile(code, path, "exec"), {"spark": spark})
+    exec(compile(code, path, "exec"), {"spark": spark, "COUNTRY": COUNTRY})
     elapsed = (time.time() - t0) / 60
     print(f"\nDone: {path} ({elapsed:.1f} min)")
     return elapsed

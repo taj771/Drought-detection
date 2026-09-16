@@ -23,7 +23,15 @@ DAT <- "Codes/_archive/_data"
 OUT <- "Codes/pdsi_validation/out"; dir.create(OUT, showWarnings = FALSE, recursive = TRUE)
 
 AWC      <- 100          # soil available water capacity (mm), uniform
-CAL0     <- 1973; CAL1 <- 2002    # calibration = SPI/SPEI reference period
+# Calibration = FULL record 1950-2023, to MATCH the SPI/SPEI pipeline (which
+# calibrates on the full series; see calibration_year_initial/final in
+# 01_v2_SPI_pandas_udf.py). Was 1973-2002 (Ref only) -> made Obs read as near-
+# permanent severe drought (mean -3.56) because the Obs period is drier than the
+# 1973-2002 baseline. Full-period cal keeps the real drying signal but on the
+# same footing as SPI/SPEI (Obs mean -1.67). See P2b_calibration_experiment.R.
+# NOTE: whether the whole project should instead use Ref-only calibration
+# (option 2) is an OPEN team decision -- see memory project_calibration_open_decision.
+CAL0     <- 1950; CAL1 <- 2023
 Y0       <- 1950; Y1   <- 2023    # full record (PDSI needs continuous series)
 
 # precip (per pixel per month) from the SPEI-Penman table

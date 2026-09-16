@@ -43,7 +43,7 @@ resources:
       name: "Drought Index Pipeline — Phase 1 (v1, R single-cluster)"
       tasks:
         - task_key: run_pipeline
-          existing_cluster_id: 0123-211315-fp4hw1e8
+          existing_cluster_id: 0826-162532-rizow5jl
           notebook_task:
             notebook_path: /Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes/v1_R_single_cluster/00. MASTER_RUN_databricks
             source: WORKSPACE
@@ -56,30 +56,61 @@ resources:
       # detection output, so it runs in Phase 1. 07 depends on 06 (avg ranks).
       # Python steps run via _run_py_step (exec); R steps via _run_r_step (source).
       # Branch new analyses by adding a task that depends_on detect_03.
+      #
+      # COUNTRY selects which country the whole run processes. Outputs go to
+      # drought_outputs/v2/<COUNTRY>/, so runs for different countries never
+      # collide. Override at launch:
+      #   databricks bundle run drought_pipeline_v2 --target dev \
+      #     --params COUNTRY=Niger
+      # Both runners print "=== COUNTRY = ... ===" — check that line in the task
+      # logs to confirm the parameter bound, since the scripts fall back to
+      # Benin if it does not.
+      #
+      # STEPS selects which tasks do work. "all" (default) runs the whole DAG.
+      # Otherwise a PIPE-separated list of task keys — pipe, not comma, because
+      # --params is itself comma-separated. Unselected tasks exit in seconds;
+      # the DAG shape is unchanged, so dependencies still resolve. Example, the
+      # minimum set for a PET-formulation comparison:
+      #   databricks bundle run drought_pipeline_v2 --target dev \
+      #     --params COUNTRY=Eritrea,STEPS=spi_01|speit_02a|speip_02b|detect_03|sanity_04|params_05
+      # Skipping a task whose downstream siblings still run means those siblings
+      # read whatever outputs already exist on the Volume — check the task logs
+      # for "=== SKIP ... ===" lines to confirm what actually ran.
+      parameters:
+        - name: COUNTRY
+          default: Eritrea
+        # Current run: Q6, does PET formulation matter in an arid climate.
+        # Needs the three index treatments (SPI = no PET, SPEI-T = temperature
+        # PET, SPEI-P = Penman PET), detection, the QC gate, and the frozen
+        # reference-period params. friedman_06 / crossperiod_07 / appendix_08 /
+        # cdd_09 answer other questions and are left out.
+        # Set back to "all" (and COUNTRY back to Benin) for a full pipeline run.
+        - name: STEPS
+          default: spi_01|speit_02a|speip_02b|detect_03|sanity_04|params_05
       tasks:
         # -- Stage 1: index calculation (parallel) ----------------------------
         - task_key: spi_01
-          existing_cluster_id: 0616-154127-izvo5r0w
+          existing_cluster_id: 0826-162532-rizow5jl
           notebook_task:
             notebook_path: /Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes/v2_pipeline/runners/_run_py_step
             source: WORKSPACE
-            base_parameters: { STEP: "01_v2_SPI_pandas_udf.py" }
+            base_parameters: { STEP: "01_v2_SPI_pandas_udf.py", TASK: "spi_01" }
           timeout_seconds: 86400
 
         - task_key: speit_02a
-          existing_cluster_id: 0616-154127-izvo5r0w
+          existing_cluster_id: 0826-162532-rizow5jl
           notebook_task:
             notebook_path: /Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes/v2_pipeline/runners/_run_py_step
             source: WORKSPACE
-            base_parameters: { STEP: "02a_v2_SPEI_Thornthwaite_pandas_udf.py" }
+            base_parameters: { STEP: "02a_v2_SPEI_Thornthwaite_pandas_udf.py", TASK: "speit_02a" }
           timeout_seconds: 86400
 
         - task_key: speip_02b
-          existing_cluster_id: 0616-154127-izvo5r0w
+          existing_cluster_id: 0826-162532-rizow5jl
           notebook_task:
             notebook_path: /Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes/v2_pipeline/runners/_run_py_step
             source: WORKSPACE
-            base_parameters: { STEP: "02b_v2_SPEI_Penman_pandas_udf.py" }
+            base_parameters: { STEP: "02b_v2_SPEI_Penman_pandas_udf.py", TASK: "speip_02b" }
           timeout_seconds: 86400
 
         # -- Stage 2: detection (joins all 3 indices) -------------------------
@@ -88,66 +119,66 @@ resources:
             - task_key: spi_01
             - task_key: speit_02a
             - task_key: speip_02b
-          existing_cluster_id: 0616-154127-izvo5r0w
+          existing_cluster_id: 0826-162532-rizow5jl
           notebook_task:
             notebook_path: /Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes/v2_pipeline/runners/_run_py_step
             source: WORKSPACE
-            base_parameters: { STEP: "03_v2_Drought_Detection_pandas_udf.py" }
+            base_parameters: { STEP: "03_v2_Drought_Detection_pandas_udf.py", TASK: "detect_03" }
           timeout_seconds: 86400
 
         # -- Stage 3: stats + figures off detection output (parallel) ---------
         - task_key: sanity_04
           depends_on: [{ task_key: detect_03 }]
-          existing_cluster_id: 0616-154127-izvo5r0w
+          existing_cluster_id: 0826-162532-rizow5jl
           notebook_task:
             notebook_path: /Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes/v2_pipeline/runners/_run_r_step
             source: WORKSPACE
-            base_parameters: { STEP: "04. Sanity_Checks.R" }
+            base_parameters: { STEP: "04. Sanity_Checks.R", TASK: "sanity_04" }
           timeout_seconds: 86400
 
         - task_key: params_05
           depends_on: [{ task_key: detect_03 }]
-          existing_cluster_id: 0616-154127-izvo5r0w
+          existing_cluster_id: 0826-162532-rizow5jl
           notebook_task:
             notebook_path: /Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes/v2_pipeline/runners/_run_py_step
             source: WORKSPACE
-            base_parameters: { STEP: "05_v2_Reference_Period_Params_pandas_udf.py" }
+            base_parameters: { STEP: "05_v2_Reference_Period_Params_pandas_udf.py", TASK: "params_05" }
           timeout_seconds: 86400
 
         - task_key: friedman_06
           depends_on: [{ task_key: detect_03 }]
-          existing_cluster_id: 0616-154127-izvo5r0w
+          existing_cluster_id: 0826-162532-rizow5jl
           notebook_task:
             notebook_path: /Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes/v2_pipeline/runners/_run_r_step
             source: WORKSPACE
-            base_parameters: { STEP: "06. Analysis1_Friedman.R" }
+            base_parameters: { STEP: "06. Analysis1_Friedman.R", TASK: "friedman_06" }
           timeout_seconds: 86400
 
         - task_key: crossperiod_07
           depends_on: [{ task_key: friedman_06 }]
-          existing_cluster_id: 0616-154127-izvo5r0w
+          existing_cluster_id: 0826-162532-rizow5jl
           notebook_task:
             notebook_path: /Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes/v2_pipeline/runners/_run_r_step
             source: WORKSPACE
-            base_parameters: { STEP: "07. Analysis2_CrossPeriod.R" }
+            base_parameters: { STEP: "07. Analysis2_CrossPeriod.R", TASK: "crossperiod_07" }
           timeout_seconds: 86400
 
         - task_key: appendix_08
           depends_on: [{ task_key: detect_03 }]
-          existing_cluster_id: 0616-154127-izvo5r0w
+          existing_cluster_id: 0826-162532-rizow5jl
           notebook_task:
             notebook_path: /Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes/v2_pipeline/runners/_run_r_step
             source: WORKSPACE
-            base_parameters: { STEP: "08. AppendixA1_Figure.R" }
+            base_parameters: { STEP: "08. AppendixA1_Figure.R", TASK: "appendix_08" }
           timeout_seconds: 86400
 
         - task_key: cdd_09
           depends_on: [{ task_key: detect_03 }]
-          existing_cluster_id: 0616-154127-izvo5r0w
+          existing_cluster_id: 0826-162532-rizow5jl
           notebook_task:
             notebook_path: /Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes/v2_pipeline/runners/_run_r_step
             source: WORKSPACE
-            base_parameters: { STEP: "09. CDD_SPI_Comparison.R" }
+            base_parameters: { STEP: "09. CDD_SPI_Comparison.R", TASK: "cdd_09" }
           timeout_seconds: 86400
 
     drought_era5_monitor:
@@ -156,7 +187,7 @@ resources:
       # source (data-consistent with v2), detects droughts + plots. No stats.
       tasks:
         - task_key: run_app
-          existing_cluster_id: 0123-211315-fp4hw1e8
+          existing_cluster_id: 0826-162532-rizow5jl
           notebook_task:
             notebook_path: /Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes/app_monitor/00_APP_MASTER
             source: WORKSPACE
