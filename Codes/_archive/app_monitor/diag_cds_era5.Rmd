@@ -1,0 +1,37 @@
+---
+title: "CDS ERA5 Table Diagnostic"
+output: html_document
+---
+
+```{r check}
+library(sparklyr)
+library(dplyr)
+library(dbplyr)
+
+sc <- spark_connect(method = "databricks")
+
+# GWSC product pipeline ERA5 source: era5-daily-data.silver_staging.era5_daily_nn
+nn <- tbl(sc, in_catalog("era5-daily-data", "silver_staging", "era5_daily_nn"))
+
+# Schema + columns
+cols <- colnames(nn)
+s <- nn %>% head(3) %>% collect()
+
+# Sri Lanka bbox: lat 5.9-9.9N, lon 79.7-81.9E
+# Check if lat/lon col names match
+lk_bbox <- nn %>%
+  filter(latitude >= 5.9, latitude <= 9.9, longitude >= 79.7, longitude <= 81.9) %>%
+  mutate(yr = year(time)) %>%
+  summarise(n = n(), n_pixels = n_distinct(longitude, latitude),
+            min_yr = min(yr), max_yr = max(yr)) %>%
+  collect()
+
+results <- list(cols = cols, schema_sample = s, sri_lanka_bbox = lk_bbox)
+saveRDS(results, "/Volumes/projects/gwsc_drought/drought_outputs/diag_cds_era5.rds")
+
+cat("Columns:\n"); print(cols)
+cat("\nSchema sample:\n"); print(s)
+cat("\nSri Lanka bbox check:\n"); print(lk_bbox)
+
+spark_disconnect(sc)
+```

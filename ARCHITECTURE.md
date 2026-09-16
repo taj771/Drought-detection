@@ -17,7 +17,7 @@ share the same underlying data but serve different goals:
 |--------|----------|---------|--------|
 | `Codes/_archive/v1_R_single_cluster/` | v1 | Original research pipeline, pure R. Superseded by v2 (with Sarva's input) to cut compute time. | **Archived 2026-09-16** — do not run. Moved under `_archive/`; its Databricks job is kept (unscheduled, renamed `[ARCHIVED]`) so run history survives. Retained as the independent full-R reference: v2's Python steps were ported from it, so it is the check to reach for if a v2 number looks wrong. |
 | `Codes/v2_pipeline/` | v2 | Research pipeline with statistical tests. Improves on v1's compute time; working with Sarva on further gains. | Running. Faster than v1, but needs a multi-node cluster — which (per Sarva) is more cost-effective at scale. |
-| `Codes/app_monitor/` | App | Daily operational monitor: detects drought events and characteristics from ERA5. | Running, full R interface. Once we finalise 1–3 configurations for 1–2 countries for GWSC daily use, v2's multi-node setup may not be needed. |
+| `Codes/_archive/app_monitor/` | App | Operational monitor: detects drought events and characteristics from ERA5. Standalone R reimplementation of the index + detection chain. | **Archived 2026-09-16** — do not run. Superseded by the operational branch, which trims v2 instead of reimplementing it. It used a different index engine (R `SPEI`, not Python `climate-indices`) and had drifted behind v2 on two result-changing fixes: it reads the broken ERA5-Land PET (replaced in v2 by CRU TS 4.08 Penman) and clips by bounding box only, never applying the country polygon (fixed in v2 script 01). |
 
 ---
 

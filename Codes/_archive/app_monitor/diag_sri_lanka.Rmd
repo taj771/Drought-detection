@@ -1,0 +1,61 @@
+---
+title: "Sri Lanka Country String Diagnostic"
+output: html_document
+---
+
+```{r check}
+library(sparklyr)
+library(dplyr)
+library(dbplyr)
+
+sc <- spark_connect(method = "databricks")
+
+global_tbl <- tbl(sc, in_catalog("era5-daily-data", "silver_dev",
+  "aer_era5_silver_approximate_1950_to_present_dev_interpolation_res5"))
+
+# Get ALL columns to understand schema
+schema_sample <- global_tbl %>%
+  filter(country %like% "%Lanka%") %>%
+  head(3) %>%
+  collect()
+
+# What does time column look like?
+time_sample <- global_tbl %>%
+  filter(country %like% "%Lanka%") %>%
+  select(time) %>%
+  head(10) %>%
+  collect()
+
+# Distinct year values (via mutate+distinct)
+yr_vals <- global_tbl %>%
+  filter(country %like% "%Lanka%") %>%
+  mutate(yr = year(time)) %>%
+  select(yr) %>%
+  distinct() %>%
+  arrange(yr) %>%
+  collect()
+
+# Row count with year filter applied same way as app
+lk_app_rows <- global_tbl %>%
+  filter(country == "Sri Lanka") %>%
+  mutate(yr = year(time), mo = month(time)) %>%
+  filter(yr >= 1973, yr <= 2023) %>%
+  summarise(n = n(), n_pixels = n_distinct(longitude, latitude),
+            min_yr = min(yr), max_yr = max(yr)) %>%
+  collect()
+
+results <- list(
+  schema_sample  = schema_sample,
+  time_sample    = time_sample,
+  yr_vals        = yr_vals,
+  lk_app_rows    = lk_app_rows
+)
+saveRDS(results, "/Volumes/projects/gwsc_drought/drought_outputs/diag_sri_lanka.rds")
+
+cat("Schema sample:\n"); print(schema_sample)
+cat("\nTime sample:\n"); print(time_sample)
+cat("\nDistinct years:\n"); print(yr_vals)
+cat("\nApp filter row count:\n"); print(lk_app_rows)
+
+spark_disconnect(sc)
+```

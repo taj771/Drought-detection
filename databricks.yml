@@ -9,7 +9,6 @@ sync:
   # in git for reference, not run), and large binaries stay local to keep the
   # bundle deploy small and fast.
   include:
-    - "Codes/app_monitor/**"
     - "Codes/v2_pipeline/**"
     - "Codes/PET_data_prep/**"
     - "databricks.yml"
@@ -190,14 +189,32 @@ resources:
             base_parameters: { STEP: "09. CDD_SPI_Comparison.R", TASK: "cdd_09" }
           timeout_seconds: 86400
 
+    # ARCHIVED 2026-09-16. Superseded by the operational branch, which trims v2
+    # rather than reimplementing it — do not run.
+    #
+    # app_monitor was a standalone R reimplementation of the index + detection
+    # chain. It read the same ERA5 source as v2 (era5_daily_nn), but computed
+    # indices with a different engine (R SPEI package, not Python
+    # climate-indices) and had drifted behind v2 on two fixes that change
+    # results:
+    #   - PET: it reads ERA5-Land pet_clipped/*.nc. That is the broken PET
+    #     (pan-evaporation plus a unit error) which v2 replaced with CRU TS 4.08
+    #     Penman, so its SPEI-P is wrong.
+    #   - Clipping: it filters pixels by bounding box only, never applying the
+    #     country polygon it loads. That is the bug fixed in v2 script 01, and
+    #     it admits ocean and neighbouring-country pixels (for Benin, roughly
+    #     double the true count).
+    # Anything produced by this job carries both. Code moved to
+    # Codes/_archive/app_monitor/ and dropped from the sync list, so it no
+    # longer deploys to the workspace.
+    #
+    # The job definition is kept, unscheduled, so its run history survives.
     drought_era5_monitor:
-      name: "GWSC Drought ERA5 Monitor"
-      # Standalone operational monitor: R + single cluster, reads v2's era5_daily_nn
-      # source (data-consistent with v2), detects droughts + plots. No stats.
+      name: "[ARCHIVED] GWSC Drought ERA5 Monitor"
       tasks:
         - task_key: run_app
           existing_cluster_id: 0826-162532-rizow5jl
           notebook_task:
-            notebook_path: /Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes/app_monitor/00_APP_MASTER
+            notebook_path: /Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes/_archive/app_monitor/00_APP_MASTER
             source: WORKSPACE
 

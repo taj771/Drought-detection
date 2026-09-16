@@ -11,6 +11,7 @@ Data/
 *.rds
 *.csv
 *.nc
+*.parquet
 *.jpg
 *.jpeg
 *.png
