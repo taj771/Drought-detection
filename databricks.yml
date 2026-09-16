@@ -39,13 +39,22 @@ targets:
 
 resources:
   jobs:
+    # ARCHIVED 2026-09-16. Superseded by drought_pipeline_v2 — do not run.
+    # v1 is the original pure-R single-cluster pipeline (scripts 00-03 only, no
+    # 04-09). It is kept as an independent reference implementation: v2's Python
+    # pandas_udf steps were ported from it, so it is the check to reach for if a
+    # v2 number ever looks wrong. Code moved to Codes/_archive/v1_R_single_cluster/.
+    #
+    # The job definition is kept rather than deleted so its run history survives;
+    # deleting it here would remove the job, and the history, on the next deploy.
+    # It has no schedule, so it only runs if someone starts it by hand.
     drought_pipeline:
-      name: "Drought Index Pipeline — Phase 1 (v1, R single-cluster)"
+      name: "[ARCHIVED] Drought Index Pipeline — Phase 1 (v1, R single-cluster)"
       tasks:
         - task_key: run_pipeline
           existing_cluster_id: 0826-162532-rizow5jl
           notebook_task:
-            notebook_path: /Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes/v1_R_single_cluster/00. MASTER_RUN_databricks
+            notebook_path: /Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes/_archive/v1_R_single_cluster/00. MASTER_RUN_databricks
             source: WORKSPACE
 
     drought_pipeline_v2:
