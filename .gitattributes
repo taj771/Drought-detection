@@ -1,0 +1,5 @@
+# Shell scripts must keep LF endings. These are uploaded to Databricks and run
+# on Linux nodes as cluster init scripts; a CRLF shebang makes the kernel look
+# for an interpreter named "bash\r", which fails the cluster boot with
+# INIT_SCRIPT_FAILURE ("cannot execute: required file not found").
+*.sh text eol=lf

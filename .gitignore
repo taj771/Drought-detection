@@ -55,3 +55,14 @@ rsconnect/
 
 # Diagnostics dumps
 diagnostics.txt
+
+# Derived analysis outputs (npz/json caches written by research scripts)
+*.npz
+*.pkl
+**/out/*.json
+
+# Editor backups
+*.bak
+
+# Local project notes (not for remotes)
+progress.md
