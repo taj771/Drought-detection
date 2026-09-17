@@ -25,10 +25,10 @@ Data/
 /.quarto/
 **/*.quarto_ipynb
 
-# IDE and tooling
-.positai
+# IDE, editor and local tooling state
+.vscode/
+.idea/
 .databricks
-.vscode
 typings/
 
 # Old scripts
@@ -47,9 +47,6 @@ COMP_START
 24
 50)
 
-# Agent/tooling state
-.hive-mind/
-
 # Shiny deployment state
 rsconnect/
 
@@ -64,5 +61,5 @@ diagnostics.txt
 # Editor backups
 *.bak
 
-# Local project notes (not for remotes)
-progress.md
+# Binary documents - synced via Box, not versioned
+Documents/
