@@ -1,0 +1,1 @@
+{ "run_name":"v2-08-rerun","tasks":[{"task_key":"r","existing_cluster_id":"0616-154127-izvo5r0w","notebook_task":{"notebook_path":"/Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes/v2_pipeline/runners/_run_r_step","base_parameters":{"STEP":"08. AppendixA1_Figure.R"}}}]}

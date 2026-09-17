@@ -1,0 +1,7 @@
+{
+  "cluster_id": "0616-154127-izvo5r0w",
+  "libraries": [
+    {"cran": {"package": "terra", "repo": "https://packagemanager.posit.co/cran/__linux__/noble/latest"}},
+    {"cran": {"package": "rnaturalearth", "repo": "https://packagemanager.posit.co/cran/__linux__/noble/latest"}}
+  ]
+}

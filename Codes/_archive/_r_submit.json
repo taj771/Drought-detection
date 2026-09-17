@@ -1,0 +1,13 @@
+{
+  "run_name": "v2-r-step-09",
+  "tasks": [
+    {
+      "task_key": "r_step",
+      "existing_cluster_id": "0616-154127-izvo5r0w",
+      "notebook_task": {
+        "notebook_path": "/Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes/_run_r_step",
+        "base_parameters": { "STEP": "09. CDD_SPI_Comparison.R" }
+      }
+    }
+  ]
+}

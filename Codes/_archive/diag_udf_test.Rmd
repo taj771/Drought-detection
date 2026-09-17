@@ -1,0 +1,29 @@
+---
+title: "spark_udf capability test"
+output: html_document
+---
+
+```{r setup}
+OUT        <- "/Volumes/projects/gwsc_drought/drought_outputs/diag_udf_test.txt"
+CODES_PATH <- "/Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes"
+CODES_PATH <- "/Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes"
+
+log_lines <- character(0)
+log <- function(msg) { log_lines <<- c(log_lines, msg) }
+flush_log <- function() writeLines(log_lines, OUT)
+
+log("CHECKPOINT 1: setup chunk")
+log(paste0("sparklyr pre-loaded: ", "sparklyr" %in% .packages()))
+
+inner_path <- file.path(CODES_PATH, "diag_udf_inner.R")
+log(paste0("inner path: ", inner_path))
+log(paste0("file exists: ", file.exists(inner_path)))
+
+tryCatch(
+  source(inner_path),
+  error = function(e) log(paste0("source() ERROR: ", conditionMessage(e)))
+)
+
+log("setup chunk done")
+flush_log()
+```

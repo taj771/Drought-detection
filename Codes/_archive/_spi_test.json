@@ -1,0 +1,1 @@
+{ "run_name":"v2-spi-clip-test","tasks":[{"task_key":"py","existing_cluster_id":"0616-154127-izvo5r0w","notebook_task":{"notebook_path":"/Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes/v2_pipeline/runners/_run_py_step","base_parameters":{"STEP":"01_v2_SPI_pandas_udf.py"}}}]}

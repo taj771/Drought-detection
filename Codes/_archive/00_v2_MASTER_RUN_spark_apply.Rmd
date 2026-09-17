@@ -1,0 +1,103 @@
+---
+title: "00_v2. MASTER RUN — SparkR gapply distributed pipeline"
+output: html_document
+---
+
+```{r main, echo=TRUE}
+# =============================================================================
+# V2 Pipeline — SparkR gapply Architecture (Databricks-native, no .tar shipping)
+# Standard DBR cluster 0616-154127-izvo5r0w (NOT ML runtime)
+# Outputs: /Volumes/projects/gwsc_drought/drought_outputs_v2/
+# =============================================================================
+
+CODES_PATH <- "/Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes"
+VOLUME_V2  <- "/Volumes/projects/gwsc_drought/drought_outputs_v2"
+
+# -- Run flags (set FALSE to skip) -------------------------------------------
+RUN_SPI         <- TRUE   # Script 01_v2 — spark_apply SPI
+RUN_SPEI_T      <- FALSE  # Script 02a_v2 — spark_apply SPEI Thornthwaite
+RUN_SPEI_P      <- FALSE  # Script 02b_v2 — spark_apply SPEI Penman
+RUN_DETECTION   <- FALSE  # Script 03 — drought detection
+RUN_FRIEDMAN    <- FALSE  # Script 06 — Friedman analysis
+RUN_CROSSPERIOD <- FALSE  # Script 07 — cross-period analysis
+
+# -- Step 1: SPI --------------------------------------------------------------
+if (RUN_SPI) {
+  message("STEP 1: SPI — spark_apply")
+  VOLUME_PATH <- VOLUME_V2
+  tryCatch(
+    source(file.path(CODES_PATH, "01_v2_SPI_spark_apply.R")),
+    error = function(e) {
+      message("SCRIPT 01_v2 ERROR: ", conditionMessage(e))
+      stop(e)
+    }
+  )
+}
+
+# -- Step 2a: SPEI Thornthwaite -----------------------------------------------
+if (RUN_SPEI_T) {
+  message("STEP 2a: SPEI Thornthwaite — spark_apply")
+  VOLUME_PATH <- VOLUME_V2
+  tryCatch(
+    source(file.path(CODES_PATH, "02a_v2_SPEI_Thornthwaite_spark_apply.R")),
+    error = function(e) {
+      message("SCRIPT 02a_v2 ERROR: ", conditionMessage(e))
+      stop(e)
+    }
+  )
+}
+
+# -- Step 2b: SPEI Penman -----------------------------------------------------
+if (RUN_SPEI_P) {
+  message("STEP 2b: SPEI Penman — spark_apply")
+  VOLUME_PATH <- VOLUME_V2
+  tryCatch(
+    source(file.path(CODES_PATH, "02b_v2_SPEI_Penman_spark_apply.R")),
+    error = function(e) {
+      message("SCRIPT 02b_v2 ERROR: ", conditionMessage(e))
+      stop(e)
+    }
+  )
+}
+
+# -- Step 3: Drought detection ------------------------------------------------
+if (RUN_DETECTION) {
+  message("STEP 3: Drought detection")
+  VOLUME_PATH <- VOLUME_V2
+  tryCatch(
+    source(file.path(CODES_PATH, "03. Drought_Detection.R")),
+    error = function(e) {
+      message("SCRIPT 03 ERROR: ", conditionMessage(e))
+      stop(e)
+    }
+  )
+}
+
+# -- Step 6: Friedman analysis ------------------------------------------------
+if (RUN_FRIEDMAN) {
+  message("STEP 6: Friedman analysis")
+  VOLUME_PATH <- VOLUME_V2
+  tryCatch(
+    source(file.path(CODES_PATH, "06. Analysis1_Friedman.R")),
+    error = function(e) {
+      message("SCRIPT 06 ERROR: ", conditionMessage(e))
+      stop(e)
+    }
+  )
+}
+
+# -- Step 7: Cross-period analysis --------------------------------------------
+if (RUN_CROSSPERIOD) {
+  message("STEP 7: Cross-period analysis")
+  VOLUME_PATH <- VOLUME_V2
+  tryCatch(
+    source(file.path(CODES_PATH, "07. Analysis2_CrossPeriod.R")),
+    error = function(e) {
+      message("SCRIPT 07 ERROR: ", conditionMessage(e))
+      stop(e)
+    }
+  )
+}
+
+message("V2 pipeline complete.")
+```

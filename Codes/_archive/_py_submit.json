@@ -1,0 +1,13 @@
+{
+  "run_name": "v2-py-step-05",
+  "tasks": [
+    {
+      "task_key": "py_step",
+      "existing_cluster_id": "0616-154127-izvo5r0w",
+      "notebook_task": {
+        "notebook_path": "/Workspace/Users/tajayalath@ua.edu/Drought-indices/files/Codes/_run_py_step",
+        "base_parameters": { "STEP": "05_v2_Reference_Period_Params_pandas_udf.py" }
+      }
+    }
+  ]
+}

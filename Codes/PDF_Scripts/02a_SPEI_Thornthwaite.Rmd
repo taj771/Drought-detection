@@ -1,0 +1,17 @@
+---
+title: "02a. SPEI Calculation — Thornthwaite PET Method"
+subtitle: "GWSC Drought Index Project"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    toc: false
+    highlight: tango
+    latex_engine: xelatex
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = FALSE)
+```
+
+```{r code, code=readLines("../02a. SPEI_Calculation_Thornthwaite.R")}
+```

@@ -1,0 +1,12 @@
+{
+  "run_name": "geo-diag",
+  "tasks": [
+    {
+      "task_key": "geo_diag",
+      "existing_cluster_id": "0616-154127-izvo5r0w",
+      "notebook_task": {
+        "notebook_path": "/Workspace/Users/tajayalath@ua.edu/Drought-indices/_diag_geo"
+      }
+    }
+  ]
+}

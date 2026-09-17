@@ -1,0 +1,28 @@
+﻿{
+    "apply_policy_default_values":  false,
+    "autotermination_minutes":  150,
+    "aws_attributes":  {
+                           "availability":  "ON_DEMAND",
+                           "first_on_demand":  5,
+                           "spot_bid_price_percent":  100,
+                           "zone_id":  "us-east-1e"
+                       },
+    "cluster_name":  "drought-r-spark-apply",
+    "data_security_mode":  "SINGLE_USER",
+    "driver_node_type_id":  "i3.xlarge",
+    "init_scripts":  [
+                         {
+                             "workspace":  {
+                                               "destination":  "/Workspace/Users/tajayalath@ua.edu/Drought-indices/init_numpy_pin.sh"
+                                           }
+                         }
+                     ],
+    "node_type_id":  "i3.xlarge",
+    "num_workers":  4,
+    "single_user_name":  "tajayalath@ua.edu",
+    "spark_conf":  {
+                       "spark.executor.heartbeatInterval":  "60s",
+                       "spark.network.timeout":  "800s"
+                   },
+    "spark_version":  "15.4.x-scala2.12"
+}

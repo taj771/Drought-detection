@@ -1,0 +1,17 @@
+---
+title: "01. SPI Calculation"
+subtitle: "GWSC Drought Index Project"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    toc: false
+    highlight: tango
+    latex_engine: xelatex
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = FALSE)
+```
+
+```{r code, code=readLines("../01. SPI_Calculation.R")}
+```
