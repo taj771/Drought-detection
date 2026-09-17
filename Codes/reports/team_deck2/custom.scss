@@ -1,0 +1,78 @@
+/*-- scss:defaults --*/
+$presentation-heading-color: #ffffff;
+
+/*-- scss:rules --*/
+
+// Content starts at the top of the slide, not vertically centred
+.reveal .slides section {
+  top: 0 !important;
+  height: 100%;
+}
+
+// Title band pinned to the top edge of the slide, like a standard PPT template
+.reveal .slides section > h2 {
+  background: #1f5673;
+  color: #ffffff;
+  font-size: 1.4em;
+  font-weight: 600;
+  text-align: left;
+  margin: 0 -60px 28px -60px;
+  padding: 18px 60px 16px 60px;
+  border-bottom: 5px solid #f2a541;
+  text-transform: none;
+}
+
+// Title slide is the one exception: its content sits vertically centred
+.reveal .slides section#title-slide {
+  display: flex !important;
+  flex-direction: column;
+  justify-content: center;
+  text-align: center;
+}
+
+// Title slide keeps its own look (no band)
+.reveal .slides section.title-slide h1,
+.reveal .slides section#title-slide h1 {
+  background: none;
+  color: #1f5673;
+}
+
+// Stacked detection frames: each fragment replaces the last in place
+.detect-stack {
+  position: relative;
+  height: 76vh;
+  margin-top: -10px;
+}
+.detect-stack p {
+  margin: 0;
+}
+.detect-stack img {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  max-height: 76vh;
+  max-width: 100%;
+  width: auto;
+  border: none;
+  box-shadow: none;
+}
+
+// Base frame sits beneath the fragment stack
+.detect-stack img.detect-base {
+  z-index: 0;
+}
+.detect-stack .fragment img,
+.detect-stack img.fragment {
+  z-index: 1;
+  background: #ffffff;
+}
+
+// Wide-figure slides: tighter title band so the tall figure fits
+.reveal .slides section:has(.detect-stack) > h2,
+.reveal .slides section:has(.wide-fig) > h2 {
+  margin-bottom: 10px;
+  padding-top: 12px;
+  padding-bottom: 10px;
+  font-size: 1.25em;
+}
