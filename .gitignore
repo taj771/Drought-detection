@@ -63,3 +63,16 @@ diagnostics.txt
 
 # Binary documents - synced via Box, not versioned
 Documents/
+
+# Operational arm: downloaded NMME forecasts and cached pipeline inputs.
+# Re-fetch with Codes/operational/A0_download_nmme.py; do not commit (50 MB each).
+Codes/operational/data/
+Codes/operational/out/
+
+# Frozen reference parameters are an exception to the blanket *.parquet rule:
+# small, derived once, and every later step needs them to reproduce a run.
+!Codes/operational/reference/*.parquet
+
+# Python bytecode
+__pycache__/
+*.py[cod]
