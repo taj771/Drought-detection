@@ -78,9 +78,10 @@ per country), plus statistical results and a few figures.
 > - Heavy, distributed steps are **Python** (`pandas_udf` / `applyInPandas`);
 >   statistics and figures are **R** (mature stats libraries).
 > - It runs as a **single Databricks multi-task Job** (`drought_pipeline_v2`) —
->   a dependency graph you trigger with one command. Index calc (01/02a/02b) →
->   detection (03) → then sanity check (04), reference params (05), Friedman
->   stats (06), cross-period (07), appendix figure (08), CDD comparison (09).
+>   a dependency graph you trigger with one command. Monthly ERA5 (00) →
+>   index calc (01/02a/02b) → detection (03) → then sanity check (04),
+>   reference params (05), Friedman stats (06), cross-period (07), appendix
+>   figure (08), CDD comparison (09).
 > - Runner notebooks (`_run_py_step`, `_run_r_step`) launch each script via a
 >   `STEP` parameter, so one job step = one script.
 > - Cluster: `0616-154127-izvo5r0w` (DBR 15.4, multi-node). Benin validated:

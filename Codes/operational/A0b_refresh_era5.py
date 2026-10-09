@@ -13,10 +13,11 @@ research arm's local export stops at December 2023, which is fine for a frozen s
 but useless here: a September 2026 forecast spliced onto 2023 history is a silent
 error, not a loud one. So the operational arm refreshes its own copy on each run.
 
-The aggregation deliberately mirrors 01_v2_SPI_pandas_udf.py -- same table, same
-longitude wrap, same bbox-before-collect, same n_days_missing guard, same polygon
-clip via gpd.sjoin(predicate="within"). Matching matters more than elegance: the
-frozen Gamma parameters were fitted on pixels produced by that script, and a pixel
+The aggregation deliberately mirrors 00_v2_ERA5_Monthly.py, the ERA5 pipeline's
+monthly step -- same table, same longitude wrap, same bbox-before-collect, same
+one-row-per-pixel-day rule, same polygon clip via gpd.sjoin(predicate="within").
+Matching matters more than elegance: the frozen Gamma parameters were fitted on
+pixels produced by that pipeline, and a pixel
 set that differs even slightly would be scored against parameters belonging to
 somewhere else. The polygon clip is the part most easily dropped by accident and
 the most costly to drop -- without it a bbox alone returns roughly 300 pixels for
@@ -26,9 +27,10 @@ What this script does NOT do: compute SPI. It only refreshes observed rainfall.
 Scoring happens in A3 against the frozen 1991-2020 parameters.
 
 One row per pixel per day is assumed by the monthly sum and enforced rather than
-trusted. The source has carried repeated daily rows, and because duplicates are
-summed, the effect was roughly doubled rainfall -- read downstream as an absence
-of drought. See monthly_precipitation and the calendar-length guard in main.
+trusted. The source carries each pixel-day as both a v1 and a v2 row from
+2025-01, and because duplicates are summed, the effect was roughly doubled
+rainfall -- read downstream as an absence of drought. See one_row_per_day, the
+conflict check and the calendar-length guard in main.
 
 Usage, from the repository root:
 
@@ -54,15 +56,19 @@ ERA5_YEAR_START = 1950
 # A month is kept only if nearly every day reported. The trailing month is always
 # partial -- ERA5 runs about five days behind real time -- and summing eleven days
 # of September as a monthly total would read as a drought that did not happen.
+# Stricter than 00_v2_ERA5_Monthly.py, which counts absent calendar days plus
+# null days against the same limit of 5 and so keeps a 31-day month with 27 days
+# reported. This script also requires 28 days present. The two agree on every
+# month the source has delivered whole; they can differ only at the ragged end.
 MAX_DAYS_MISSING = 5
 MIN_DAYS_PRESENT = 28
 
 # A month cannot have more days than the calendar gives it. The two guards above
-# are both lower bounds, so before this check a month carrying duplicate daily
-# rows passed as MORE complete than required -- and the duplicates were summed,
-# roughly doubling rainfall. That is a wet bias, which suppresses drought, which
-# is the direction that costs most. Observed 2025-01 to 2026-05 with up to 62
-# days in a month.
+# are both lower bounds, so without this check a month carrying duplicate daily
+# rows would pass as MORE complete than required while its rainfall was summed
+# twice. That is a wet bias, which suppresses drought. The v1/v2 duplicates from
+# 2025-01 did exactly this (up to 62 days in a month) before one_row_per_day was
+# added; the guard stays as a backstop.
 MAX_DAYS_OVER_CALENDAR = 0
 
 OUT_DIR = f"/Volumes/projects/gwsc_drought/drought_outputs/operational/{COUNTRY_TAG}"
@@ -91,7 +97,7 @@ except ImportError:
     pip_install("geopandas")
 
 import geopandas as gpd
-from pyspark.sql import SparkSession
+from pyspark.sql import SparkSession, Window
 from pyspark.sql import functions as F
 from shapely import wkb
 
@@ -118,6 +124,60 @@ def country_boundary(country):
     return gdf, gdf.total_bounds
 
 
+def one_row_per_day(daily):
+    """Reduce the daily rows to one per pixel-day, preferring the newest version.
+
+    The source carries each pixel-day twice from 2025-01: a preliminary copy
+    (data_version v1) and a reprocessed one (v2). The two differ in
+    data_version, ingest_date and verified_date, so a whole-row dedupe removes
+    neither, and F.sum then counts the day twice -- roughly doubled rainfall,
+    read downstream as an absence of drought. Months after the reprocess exist
+    only as v1, so filtering to v2 would lose them.
+
+    Rule: keep the highest version of each pixel-day, falling back to a lower
+    one where no higher exists. Same rule as the team's ERA5 data pull.
+
+    Two rows of the winning version with different values are a genuine
+    conflict that version preference cannot settle. They are flagged in
+    `conflict` and main refuses to write, rather than keep an arbitrary one.
+    Only the winning version is checked; disagreement among superseded rows
+    never reaches the output.
+
+    A non-null version label that does not parse as "v<integer>" would rank
+    lowest without notice. It is flagged in `bad_version` and is also fatal.
+
+    Runs after the bbox filter, so the window covers one country, not the globe.
+    """
+    key = ["longitude", "latitude", "time"]
+    values = ["sum_tp_mm", "mean_t2m_c", "max_t2m_c", "min_t2m_c"]
+    # Parsed, not compared as text, so "v10" does not sort below "v9". A missing
+    # version ranks lowest.
+    parsed = F.expr("try_cast(substr(data_version, 2) AS INT)")
+    version_num = F.coalesce(parsed, F.lit(0))
+    bad_version = (
+        F.col("data_version").isNotNull()
+        & (~F.col("data_version").startswith("v") | parsed.isNull())
+    ).cast("int")
+    by_day = Window.partitionBy(*key)
+    by_day_version = Window.partitionBy(*key, "version_num")
+    ranked = by_day.orderBy(
+        F.col("version_num").desc(), F.col("ingest_date").desc_nulls_last()
+    )
+
+    return (
+        daily
+        # Exact repeats of one version collapse first; arrival dates are not
+        # part of what a row says.
+        .dropDuplicates(key + ["data_version"] + values)
+        .withColumn("version_num", version_num)
+        .withColumn("bad_version", F.max(bad_version).over(by_day))
+        .withColumn("rows_for_version", F.count(F.lit(1)).over(by_day_version))
+        .withColumn("rank", F.row_number().over(ranked))
+        .filter(F.col("rank") == 1)
+        .withColumn("conflict", (F.col("rows_for_version") > 1).cast("int"))
+    )
+
+
 def monthly_precipitation(bbox, year_start):
     """Daily ERA5 aggregated to monthly totals inside the bounding box.
 
@@ -125,25 +185,8 @@ def monthly_precipitation(bbox, year_start):
     is what keeps a global table tractable; collecting first would pull far more
     than the driver can hold.
     """
-    daily = spark.table(ERA5_TABLE)
-
-    return (
-        daily
-        # One row per pixel per day, enforced rather than assumed. The source
-        # table carries repeated daily rows, and F.sum below adds each one, so a
-        # duplicated day is counted twice as rainfall. Dropping here rather than
-        # after the groupBy is what makes the sum correct, not merely the day
-        # count.
-        #
-        # Deliberately a whole-row dedupe, not dropDuplicates on
-        # (longitude, latitude, time). Keying on the three columns would always
-        # leave exactly one row per day and so would always satisfy the
-        # calendar-length guard below -- including in the case that guard exists
-        # to catch, where the same day appears twice with DIFFERENT rainfall.
-        # There the keyed form silently keeps an arbitrary one. Whole-row dedupe
-        # collapses exact repeats, which is what the observed 2025-01 to 2026-05
-        # contamination is, and leaves genuine conflicts in place to fail loudly.
-        .dropDuplicates()
+    daily = (
+        spark.table(ERA5_TABLE)
         # The table stores longitude on 0-360; the boundaries and the NMME grid
         # both use -180 to 180.
         .withColumn(
@@ -161,12 +204,18 @@ def monthly_precipitation(bbox, year_start):
             & (F.col("latitude") >= float(bbox[1]))
             & (F.col("latitude") <= float(bbox[3]))
         )
+    )
+
+    return (
+        one_row_per_day(daily)
         .groupBy("lon_180", "latitude", "year", "month")
         .agg(
             F.sum("sum_tp_mm").alias("monthly_precip"),
             F.avg("mean_t2m_c").alias("mean_temp_monthly"),
             F.count("time").alias("n_days_observed"),
             F.sum(F.col("sum_tp_mm").isNull().cast("int")).alias("n_days_missing"),
+            F.sum("conflict").alias("n_conflict_days"),
+            F.sum("bad_version").alias("n_bad_version_days"),
         )
         .withColumnRenamed("lon_180", "x")
         .withColumnRenamed("latitude", "y")
@@ -207,7 +256,32 @@ def main():
     print(f"bbox: lon [{bbox[0]:.2f}, {bbox[2]:.2f}], lat [{bbox[1]:.2f}, {bbox[3]:.2f}]")
 
     monthly = monthly_precipitation(bbox, ERA5_YEAR_START)
-    clipped = clip_to_country(monthly, boundaries, COUNTRY_TAG)
+    # Cached: the checks, the dropped-month report and the write below would
+    # otherwise each rerun the ERA5 scan and the window ranking.
+    clipped = clip_to_country(monthly, boundaries, COUNTRY_TAG).cache()
+    clipped_cached = clipped
+
+    flags = clipped.agg(
+        F.sum("n_bad_version_days").alias("bad"),
+        F.sum("n_conflict_days").alias("conflicts"),
+    ).collect()[0]
+
+    if flags.bad:
+        raise ValueError(
+            f"{flags.bad} pixel-day(s) carry a data_version that does not parse as "
+            f"'v<integer>'. Version preference cannot rank them. Update the "
+            f"parsing rule in one_row_per_day before rerunning."
+        )
+
+    # Same version, different values: one_row_per_day kept one of them, but
+    # there is no basis for which. Refuse rather than write a guess.
+    conflicts = flags.conflicts or 0
+    if conflicts:
+        raise ValueError(
+            f"{conflicts} pixel-day(s) carry two rows of the same data_version with "
+            f"different values. Version preference cannot choose between them. "
+            f"Investigate {ERA5_TABLE} before rerunning."
+        )
 
     # Drop months that did not fully report. Both guards are needed: a month can
     # have few explicit nulls but simply stop part way, which is what the trailing
@@ -277,17 +351,17 @@ def main():
             worst = max(impossible, key=lambda r: r.n_days_observed)
             raise ValueError(
                 f"{len(impossible)} month(s) exceed their calendar length after "
-                f"whole-row deduplication -- worst {worst.year}-{worst.month:02d} "
+                f"deduplication -- worst {worst.year}-{worst.month:02d} "
                 f"with {worst.n_days_observed} days of {worst.days_in_month}. "
-                f"Exact repeats have already been removed, so the remaining "
-                f"duplicates differ in their values: the same day carries two "
-                f"different rainfall totals and there is no basis here for "
-                f"choosing between them. Duplicate rainfall is summed, so the "
+                f"One row per pixel-day has already been enforced, so the source "
+                f"repeats something finer than a day. "
+                f"Duplicate rainfall is summed, so the "
                 f"record would be biased wet and drought under-reported. "
                 f"Investigate the source table before rerunning."
             )
 
     out.coalesce(1).write.mode("overwrite").parquet(OUT_PATH)
+    clipped_cached.unpersist()
     print(f"wrote {OUT_PATH}")
 
     try:

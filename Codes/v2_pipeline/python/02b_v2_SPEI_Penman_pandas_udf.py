@@ -12,7 +12,6 @@
 # COUNTRY is injected by the runner (_run_py_step) from the job parameter, so
 # every task in a run agrees. Falls back to Benin for standalone/notebook use.
 COUNTRY_TAG     = globals().get("COUNTRY", "Benin")
-COUNTRY_FILTER  = [COUNTRY_TAG]   # one country per run
 ERA5_YEAR_START = 1950
 ERA5_YEAR_END   = 2023   # CRU PET runs 1901-2023; inner-join caps SPEI-P here
 # PET now = CRU TS 4.08 Penman-Monteith, staged as parquet on the Volume
@@ -27,7 +26,7 @@ import subprocess, sys
 def pip_install(pkg):
     subprocess.check_call([sys.executable, "-m", "pip", "install", pkg, "-q"])
 
-for pkg in ["climate-indices", "geopandas", "xarray", "netCDF4"]:
+for pkg in ["climate-indices"]:
     try:
         __import__(pkg.replace("-", "_"))
     except ImportError:
@@ -39,10 +38,6 @@ spark = SparkSession.builder.getOrCreate()
 import os
 import numpy as np
 import pandas as pd
-import geopandas as gpd
-import xarray as xr
-from shapely import wkb
-from pyspark.sql import functions as F
 from pyspark.sql.types import (
     StructType, StructField, DoubleType, IntegerType, StringType
 )
@@ -51,75 +46,24 @@ from pyspark.sql.functions import pandas_udf, PandasUDFType
 print("Spark session active:", spark.version)
 
 
-# -- Load country boundaries (driver) ----------------------------------------
-print("Loading country boundaries...")
-boundaries_raw = (
-    spark.table("`era5-daily-data`.silver_staging.esri_worldcountryboundaries_global_silver")
-    .select("COUNTRY", "chip_wkb")
-    .filter(F.col("COUNTRY").isin(COUNTRY_FILTER))
-    .toPandas()
-)
-boundaries_raw["geometry"] = boundaries_raw["chip_wkb"].apply(
-    lambda b: wkb.loads(bytes(b))
-)
-boundaries_gdf = gpd.GeoDataFrame(boundaries_raw, geometry="geometry", crs=4326)
-boundaries_gdf = boundaries_gdf.drop(columns=["chip_wkb"])
-boundaries_gdf = boundaries_gdf[boundaries_gdf.geometry.is_valid]
-print(f"Boundaries loaded: {len(boundaries_gdf)} features for {COUNTRY_FILTER}")
-
-bb = boundaries_gdf.total_bounds
-
-
-# -- ERA5 daily -> monthly aggregation in Spark -------------------------------
-era5_raw = spark.table("`era5-daily-data`.silver_staging.era5_daily_nn")
-
-era5_conv = (
-    era5_raw
-    .withColumn("lon_180",
-        F.when(F.col("longitude") > 180, F.col("longitude") - 360)
-         .otherwise(F.col("longitude")))
-    .withColumn("year",  F.year("time"))
-    .withColumn("month", F.month("time"))
-    .filter((F.col("year") >= ERA5_YEAR_START) & (F.col("year") <= ERA5_YEAR_END))
-    .filter(
-        (F.col("lon_180") >= float(bb[0])) & (F.col("lon_180") <= float(bb[2])) &
-        (F.col("latitude") >= float(bb[1])) & (F.col("latitude") <= float(bb[3]))
-    )
-)
-
-monthly_spark = (
-    era5_conv
-    .groupBy("lon_180", "latitude", "year", "month")
-    .agg(
-        F.sum("sum_tp_mm").alias("monthly_precip"),
-        F.sum(F.col("sum_tp_mm").isNull().cast("int")).alias("n_days_missing")
-    )
-    .filter(F.col("n_days_missing") < 5)
-    .withColumnRenamed("lon_180",  "x")
-    .withColumnRenamed("latitude", "y")
-)
-
-print("Collecting monthly data to driver...")
-monthly_df = monthly_spark.toPandas()
-print(f"Collected: {len(monthly_df):,} rows, {monthly_df[['x','y']].drop_duplicates().shape[0]} pixels")
-
-
-# -- Spatial clip (driver) ----------------------------------------------------
-pixels = monthly_df[["x", "y"]].drop_duplicates().copy()
-pixels_gdf = gpd.GeoDataFrame(
-    pixels, geometry=gpd.points_from_xy(pixels["x"], pixels["y"]), crs=4326
-)
-joined = gpd.sjoin(pixels_gdf, boundaries_gdf[["COUNTRY", "geometry"]],
-                   how="left", predicate="within")
-pixels_with_country = (
-    joined[joined["COUNTRY"].notna()][["x", "y", "COUNTRY"]]
-    .rename(columns={"COUNTRY": "country"})
-    .drop_duplicates(subset=["x", "y"])
-)
-print(f"Pixels after clip: {len(pixels_with_country)} (of {len(pixels)} total)")
-
-monthly_clipped = monthly_df.merge(pixels_with_country, on=["x", "y"], how="inner").reset_index(drop=True)
-print(f"Rows after clip: {len(monthly_clipped):,}")
+# -- Monthly ERA5 (built once by 00_v2_ERA5_Monthly) ---------------------------
+# Already deduplicated to one row per pixel-day, aggregated to monthly, stripped
+# of incomplete months and clipped to the country polygon. This script only
+# applies its own year window.
+monthly_path = f"{VOLUME_PATH}/era5_monthly.parquet"
+print(f"Loading monthly ERA5: {monthly_path}")
+monthly_clipped = pd.read_parquet(monthly_path)
+monthly_clipped = monthly_clipped[
+    (monthly_clipped["year"] >= ERA5_YEAR_START) & (monthly_clipped["year"] <= ERA5_YEAR_END)
+].reset_index(drop=True)
+if monthly_clipped.empty:
+    raise ValueError(f"no monthly rows for {COUNTRY_TAG} in {ERA5_YEAR_START}-{ERA5_YEAR_END}")
+print(f"Monthly ERA5: {len(monthly_clipped):,} rows, "
+      f"{monthly_clipped[['x', 'y']].drop_duplicates().shape[0]} pixels")
+# Logged so a run with monthly_00 skipped (STEPS) shows which file it used.
+_built = pd.Timestamp(os.path.getmtime(monthly_path), unit="s").strftime("%Y-%m-%d %H:%M")
+_last = int((monthly_clipped["year"] * 100 + monthly_clipped["month"]).max())
+print(f"era5_monthly.parquet written {_built} UTC; last month used {_last}")
 
 
 # -- Load Penman-Monteith PET (CRU TS 4.08) ----------------------------------

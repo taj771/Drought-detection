@@ -2,14 +2,14 @@
 # 01_v2. SPI Calculation — PySpark Pandas UDF (distributed, multi-node)
 # =============================================================================
 # Architecture: PySpark Pandas UDF grouped by (x, y) — one pixel per task.
-# Data stays in Spark throughout — no toPandas() on monthly data.
-# Country assigned via bbox filter only (Benin bbox tight enough).
+# Reads the monthly series built by 00_v2_ERA5_Monthly (era5_monthly.parquet).
+# Dedupe, completeness checks and the polygon clip all happen in 00.
 #
-# Data source: `era5-daily-data`.silver_staging.era5_daily_nn (global, 0.25 deg,
-#              GWSC product pipeline ERA5 source, 1950-2026, PET-matched grid)
+# Input: era5_monthly.parquet in VOLUME_PATH, built by 00_v2_ERA5_Monthly from
+#        `era5-daily-data`.silver_staging.era5_daily_nn (global, 0.25 deg).
 # SPI method: climate-indices package (gamma distribution, matches R SPEI pkg)
 #
-# Requires: climate-indices, geopandas — pip-installed below if absent.
+# Requires: climate-indices — pip-installed below if absent.
 #
 # Output: spi_results.parquet in VOLUME_PATH
 #   Read in R scripts 03+: arrow::read_parquet("...spi_results.parquet")
@@ -19,7 +19,6 @@
 # COUNTRY is injected by the runner (_run_py_step) from the job parameter, so
 # every task in a run agrees. Falls back to Benin for standalone/notebook use.
 COUNTRY_TAG     = globals().get("COUNTRY", "Benin")
-COUNTRY_FILTER  = [COUNTRY_TAG]   # one country per run
 ERA5_YEAR_START = 1950
 ERA5_YEAR_END   = 2023
 # Per-country output dir: filenames stay identical across countries, so runs for
@@ -35,7 +34,7 @@ import subprocess, sys
 def pip_install(pkg):
     subprocess.check_call([sys.executable, "-m", "pip", "install", pkg, "-q"])
 
-for pkg in ["climate-indices", "geopandas"]:
+for pkg in ["climate-indices"]:
     try:
         __import__(pkg.replace("-", "_"))
     except ImportError:
@@ -44,11 +43,9 @@ for pkg in ["climate-indices", "geopandas"]:
 from pyspark.sql import SparkSession
 spark = SparkSession.builder.getOrCreate()
 
+import os
 import numpy as np
 import pandas as pd
-import geopandas as gpd
-from shapely import wkb
-from pyspark.sql import functions as F
 from pyspark.sql.types import (
     StructType, StructField, DoubleType, IntegerType, StringType
 )
@@ -57,76 +54,25 @@ from pyspark.sql.functions import pandas_udf, PandasUDFType
 print("Spark session active:", spark.version)
 
 
-# -- Load country boundaries (driver, small collect) --------------------------
-print("Loading country boundaries...")
-boundaries_raw = (
-    spark.table("`era5-daily-data`.silver_staging.esri_worldcountryboundaries_global_silver")
-    .select("COUNTRY", "chip_wkb")
-    .filter(F.col("COUNTRY").isin(COUNTRY_FILTER))
-    .toPandas()
-)
-
-boundaries_raw["geometry"] = boundaries_raw["chip_wkb"].apply(
-    lambda b: wkb.loads(bytes(b))
-)
-boundaries_gdf = gpd.GeoDataFrame(boundaries_raw, geometry="geometry", crs=4326)
-boundaries_gdf = boundaries_gdf[boundaries_gdf.geometry.is_valid]
-print(f"Boundaries loaded: {len(boundaries_gdf)} features for {COUNTRY_FILTER}")
-
-# Dynamic bounding box — filters ERA5 in Spark before any collect
-bb = boundaries_gdf.total_bounds  # [xmin, ymin, xmax, ymax]
-print(f"Bbox: lon [{bb[0]:.2f}, {bb[2]:.2f}], lat [{bb[1]:.2f}, {bb[3]:.2f}]")
-
-
-# -- ERA5 daily -> monthly aggregation fully in Spark -------------------------
-print("Aggregating ERA5 daily -> monthly in Spark (no collect)...")
-era5_raw = spark.table("`era5-daily-data`.silver_staging.era5_daily_nn")
-
-monthly_spark = (
-    era5_raw
-    .withColumn("lon_180",
-        F.when(F.col("longitude") > 180, F.col("longitude") - 360)
-         .otherwise(F.col("longitude")))
-    .withColumn("year",  F.year("time"))
-    .withColumn("month", F.month("time"))
-    .filter((F.col("year") >= ERA5_YEAR_START) & (F.col("year") <= ERA5_YEAR_END))
-    .filter(
-        (F.col("lon_180")  >= float(bb[0])) & (F.col("lon_180")  <= float(bb[2])) &
-        (F.col("latitude") >= float(bb[1])) & (F.col("latitude") <= float(bb[3]))
-    )
-    .groupBy("lon_180", "latitude", "year", "month")
-    .agg(
-        F.sum("sum_tp_mm").alias("monthly_precip"),
-        F.avg("mean_t2m_c").alias("mean_temp_monthly"),
-        F.count("time").alias("n_days_observed"),
-        F.sum(F.col("sum_tp_mm").isNull().cast("int")).alias("n_days_missing")
-    )
-    .filter(F.col("n_days_missing") < 5)
-    .withColumnRenamed("lon_180",  "x")
-    .withColumnRenamed("latitude", "y")
-)
-
-# -- Polygon clip: keep only pixels INSIDE the country boundary ----------------
-# The bbox above is a rectangle; it grabs ocean + neighbour-country cells that
-# would otherwise be mislabelled as this country. Clip the distinct pixel grid
-# to the boundary polygon on the driver (only ~hundreds of pixels), then keep
-# matching rows. Same gpd.sjoin(predicate="within") approach as 02a/02b so SPI
-# and SPEI share an identical pixel set. Country assigned from the spatial join.
-pixels = monthly_spark.select("x", "y").distinct().toPandas()
-pixels_gdf = gpd.GeoDataFrame(
-    pixels, geometry=gpd.points_from_xy(pixels["x"], pixels["y"]), crs=4326
-)
-joined = gpd.sjoin(pixels_gdf, boundaries_gdf[["COUNTRY", "geometry"]],
-                   how="left", predicate="within")
-pixels_with_country = (
-    joined[joined["COUNTRY"].notna()][["x", "y", "COUNTRY"]]
-    .rename(columns={"COUNTRY": "country"})
-    .drop_duplicates(subset=["x", "y"])
-)
-print(f"Polygon clip: {len(pixels_with_country)} of {len(pixels)} bbox pixels inside boundary")
-
-valid_sdf = spark.createDataFrame(pixels_with_country[["x", "y", "country"]])
-monthly_spark = monthly_spark.join(F.broadcast(valid_sdf), on=["x", "y"], how="inner")
+# -- Monthly ERA5 (built once by 00_v2_ERA5_Monthly) ---------------------------
+# Already deduplicated to one row per pixel-day, aggregated to monthly, stripped
+# of incomplete months and clipped to the country polygon. This script only
+# applies its own year window.
+monthly_path = f"{VOLUME_PATH}/era5_monthly.parquet"
+print(f"Loading monthly ERA5: {monthly_path}")
+monthly_pdf = pd.read_parquet(monthly_path)
+monthly_pdf = monthly_pdf[
+    (monthly_pdf["year"] >= ERA5_YEAR_START) & (monthly_pdf["year"] <= ERA5_YEAR_END)
+].reset_index(drop=True)
+if monthly_pdf.empty:
+    raise ValueError(f"no monthly rows for {COUNTRY_TAG} in {ERA5_YEAR_START}-{ERA5_YEAR_END}")
+print(f"Monthly ERA5: {len(monthly_pdf):,} rows, "
+      f"{monthly_pdf[['x', 'y']].drop_duplicates().shape[0]} pixels")
+# Logged so a run with monthly_00 skipped (STEPS) shows which file it used.
+_built = pd.Timestamp(os.path.getmtime(monthly_path), unit="s").strftime("%Y-%m-%d %H:%M")
+_last = int((monthly_pdf["year"] * 100 + monthly_pdf["month"]).max())
+print(f"era5_monthly.parquet written {_built} UTC; last month used {_last}")
+monthly_spark = spark.createDataFrame(monthly_pdf)
 
 # Repartition by pixel for even UDF distribution
 n_par = spark.sparkContext.defaultParallelism * 2
@@ -198,7 +144,6 @@ def spi_udf(df: pd.DataFrame) -> pd.DataFrame:
 
 # -- Apply UDF + save directly from Spark (no collect to driver) --------------
 print("Running SPI via Pandas UDF (distributed, no driver collect)...")
-import os
 os.makedirs(VOLUME_PATH, exist_ok=True)
 out_path = f"{VOLUME_PATH}/spi_results.parquet"
 
