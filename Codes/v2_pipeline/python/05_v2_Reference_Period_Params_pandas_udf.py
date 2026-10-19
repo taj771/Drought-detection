@@ -48,11 +48,17 @@ import subprocess, sys
 def pip_install(pkg):
     subprocess.check_call([sys.executable, "-m", "pip", "install", pkg, "-q"])
 
-for pkg in ["climate-indices"]:
-    try:
-        __import__(pkg.replace("-", "_"))
-    except ImportError:
-        pip_install(pkg)
+# Pinned: 3.0.0 changes SPI in zero-precipitation months. Must match
+# init_numpy_pin.sh. Fails loudly if the cluster has a different version.
+CLIMATE_INDICES = "2.4.0"
+try:
+    import climate_indices
+except ImportError:
+    pip_install(f"climate-indices=={CLIMATE_INDICES}")
+from importlib.metadata import version
+assert version("climate-indices") == CLIMATE_INDICES, (
+    f"climate-indices {version('climate-indices')} installed, expected {CLIMATE_INDICES}"
+)
 
 from pyspark.sql import SparkSession
 spark = SparkSession.builder.getOrCreate()
