@@ -12,10 +12,10 @@ mixed distribution explicitly:
     H(x) = p0 + (1 - p0) * G(x;  alpha, beta)
 
 because transform_fitted_gamma accepts frozen alpha and beta but re-derives p0 from
-whatever series it is handed (compute.py, line 56). On a 74-year ERA5 series that is
-nearly the reference p0 and the difference never shows; on a 48-month forecast series
-it is a different number, and SPI then drifts run to run even though alpha and beta
-never move. A3 exists to close that gap, so the test has to exercise the composition
+the calibration window of whatever series it is handed. On a 74-year ERA5 series that
+window holds the reference years; on a 48-month forecast series it does not, p0 is a
+different number, and SPI then drifts run to run even though alpha and beta never
+move. A3 exists to close that gap, so the test has to exercise the composition
 and not the library call it replaced.
 
 An earlier version of this file tested transform_fitted_gamma directly. It reported
@@ -23,9 +23,11 @@ EXACT, and would have gone on reporting EXACT however wrong A3's p0 handling bec
 because it never ran A3's code. That is the failure mode this rewrite removes.
 
 Ground truth. spi_era5_reference_period.parquet holds SPI for the same 154 pixels
-produced by climate_indices from the 1973-2002 parameters. To compare like with like,
-p0 is supplied here as the library itself would have derived it -- from the full
-series it was given, not from the reference window. Anything else would make the two
+produced by climate_indices 3.0.0 from the 1973-2002 parameters. To compare like
+with like, p0 is supplied here as the library itself derives it: the zero fraction of
+each calendar month's non-missing values over 1973-2002. (climate_indices 2.x counted
+zeros over the whole series instead, with missing values in the denominator; a
+ground-truth file from 2.x will not match.) Anything else would make the two
 legitimately differ and the comparison would test the choice of p0 rather than the
 arithmetic.
 
@@ -56,6 +58,10 @@ KNOWN_GOOD = DATA / "spi_era5_reference_period.parquet"
 
 SCALES = [1, 3, 6, 12]
 
+# The calibration window script 05 handed the library, which is the window the
+# library measures p0 over.
+REF_Y0, REF_Y1 = 1973, 2002
+
 # A wrong p0 for the negative control. 0.2 is large enough to move SPI well past any
 # tolerance yet small enough to stay inside the distribution, so a failure to detect
 # it is a real blindness rather than an arithmetic overflow.
@@ -73,22 +79,26 @@ def load_a3():
     return module
 
 
-def library_p0(accumulated):
-    """p0 as transform_fitted_gamma derives it, from the whole series it is given.
+def library_p0(accumulated, years):
+    """p0 as climate_indices 3.0.0 derives it, over the calibration window.
 
-        probabilities_of_zero = zeros / values.shape[0]      compute.py, line 56
+        zeros / non-missing, per calendar month, calibration years only
+        (compute._calibration_probabilities_of_zero)
 
-    Reproduced here so the comparison isolates the arithmetic. The library counts
-    zeros against the full length including NaN, which at scale > 1 includes the
-    warm-up positions; matching that exactly is the point.
+    Reproduced here so the comparison isolates the arithmetic. NaN is left out of
+    the denominator, so the warm-up positions at scale > 1 do not count; a month
+    with no non-missing calibration value has no defined p0 and gets NaN.
     """
     values = np.asarray(accumulated, float)
+    years = np.asarray(years, int)
     reshaped = values.reshape(-1, 12)
+    in_window = (years.reshape(-1, 12)[:, 0] >= REF_Y0) & (years.reshape(-1, 12)[:, 0] <= REF_Y1)
 
     p0 = {}
     for month in range(1, 13):
-        column = reshaped[:, month - 1]
-        p0[month] = float((column == 0).sum() / len(column))
+        column = reshaped[in_window, month - 1]
+        valid = ~np.isnan(column)
+        p0[month] = float((column[valid] == 0).sum() / valid.sum()) if valid.any() else np.nan
     return p0
 
 
@@ -118,6 +128,7 @@ def run(a3, known, plookup, scales, p0_override=None):
         grp = grp.sort_values(["year", "month"]).reset_index(drop=True)
         precip = grp["monthly_precip"].to_numpy(float)
         months = grp["month"].to_numpy(int)
+        years = grp["year"].to_numpy(int)
 
         # A3's composition is per element and needs no reshaping, but library_p0
         # does reshape, so the series must be whole years starting in January.
@@ -136,7 +147,7 @@ def run(a3, known, plookup, scales, p0_override=None):
             p0 = (
                 {m: p0_override for m in range(1, 13)}
                 if p0_override is not None
-                else library_p0(accumulated)
+                else library_p0(accumulated, years)
             )
 
             mine = a3.spi_from_params(accumulated, months, plookup[key], p0)

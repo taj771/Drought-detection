@@ -24,9 +24,10 @@ import subprocess, sys
 def pip_install(pkg):
     subprocess.check_call([sys.executable, "-m", "pip", "install", pkg, "-q"])
 
-# Pinned: 3.0.0 changes SPI in zero-precipitation months. Must match
-# init_numpy_pin.sh. Fails loudly if the cluster has a different version.
-CLIMATE_INDICES = "2.4.0"
+# Pinned: releases can change SPI values (3.0.0 fixed the probability of zero
+# rainfall). Must match init_numpy_pin.sh. Fails loudly if the cluster has a
+# different version.
+CLIMATE_INDICES = "3.0.0"
 try:
     import climate_indices
 except ImportError:
@@ -45,6 +46,7 @@ import pandas as pd
 from pyspark.sql.types import (
     StructType, StructField, DoubleType, IntegerType, StringType
 )
+from pyspark.sql import functions as F
 from pyspark.sql.functions import pandas_udf, PandasUDFType
 
 print("Spark session active:", spark.version)
@@ -53,21 +55,25 @@ print("Spark session active:", spark.version)
 # -- Monthly ERA5 (built once by 00_v2_ERA5_Monthly) ---------------------------
 # Already deduplicated to one row per pixel-day, aggregated to monthly, stripped
 # of incomplete months and clipped to the country polygon. This script only
-# applies its own year window.
+# applies its own year window. Read and filtered in Spark, so the monthly data
+# never passes through the driver; only a one-row summary is collected.
 monthly_path = f"{VOLUME_PATH}/era5_monthly.parquet"
 print(f"Loading monthly ERA5: {monthly_path}")
-monthly_clipped = pd.read_parquet(monthly_path)
-monthly_clipped = monthly_clipped[
-    (monthly_clipped["year"] >= ERA5_YEAR_START) & (monthly_clipped["year"] <= ERA5_YEAR_END)
-].reset_index(drop=True)
-if monthly_clipped.empty:
+monthly_sdf = (
+    spark.read.parquet(monthly_path)
+    .filter((F.col("year") >= ERA5_YEAR_START) & (F.col("year") <= ERA5_YEAR_END))
+)
+_summary = monthly_sdf.agg(
+    F.count(F.lit(1)).alias("rows"),
+    F.countDistinct("x", "y").alias("pixels"),
+    F.max(F.col("year") * 100 + F.col("month")).alias("last"),
+).first()
+if _summary["rows"] == 0:
     raise ValueError(f"no monthly rows for {COUNTRY_TAG} in {ERA5_YEAR_START}-{ERA5_YEAR_END}")
-print(f"Monthly ERA5: {len(monthly_clipped):,} rows, "
-      f"{monthly_clipped[['x', 'y']].drop_duplicates().shape[0]} pixels")
+print(f"Monthly ERA5: {_summary['rows']:,} rows, {_summary['pixels']} pixels")
 # Logged so a run with monthly_00 skipped (STEPS) shows which file it used.
 _built = pd.Timestamp(os.path.getmtime(monthly_path), unit="s").strftime("%Y-%m-%d %H:%M")
-_last = int((monthly_clipped["year"] * 100 + monthly_clipped["month"]).max())
-print(f"era5_monthly.parquet written {_built} UTC; last month used {_last}")
+print(f"era5_monthly.parquet written {_built} UTC; last month used {_summary['last']}")
 
 
 # -- SPEI-Thornthwaite Pandas UDF ---------------------------------------------
@@ -169,8 +175,6 @@ def spei_t_udf(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # -- Distribute ---------------------------------------------------------------
-print("Creating Spark DataFrame from clipped data...")
-monthly_sdf = spark.createDataFrame(monthly_clipped)
 monthly_sdf = monthly_sdf.repartition(spark.sparkContext.defaultParallelism * 2, "x", "y")
 
 print("Running SPEI-Thornthwaite via Pandas UDF (distributed)...")

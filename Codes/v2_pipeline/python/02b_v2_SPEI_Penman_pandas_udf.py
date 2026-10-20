@@ -26,9 +26,10 @@ import subprocess, sys
 def pip_install(pkg):
     subprocess.check_call([sys.executable, "-m", "pip", "install", pkg, "-q"])
 
-# Pinned: 3.0.0 changes SPI in zero-precipitation months. Must match
-# init_numpy_pin.sh. Fails loudly if the cluster has a different version.
-CLIMATE_INDICES = "2.4.0"
+# Pinned: releases can change SPI values (3.0.0 fixed the probability of zero
+# rainfall). Must match init_numpy_pin.sh. Fails loudly if the cluster has a
+# different version.
+CLIMATE_INDICES = "3.0.0"
 try:
     import climate_indices
 except ImportError:
@@ -47,6 +48,7 @@ import pandas as pd
 from pyspark.sql.types import (
     StructType, StructField, DoubleType, IntegerType, StringType
 )
+from pyspark.sql import functions as F
 from pyspark.sql.functions import pandas_udf, PandasUDFType
 
 print("Spark session active:", spark.version)
@@ -55,21 +57,25 @@ print("Spark session active:", spark.version)
 # -- Monthly ERA5 (built once by 00_v2_ERA5_Monthly) ---------------------------
 # Already deduplicated to one row per pixel-day, aggregated to monthly, stripped
 # of incomplete months and clipped to the country polygon. This script only
-# applies its own year window.
+# applies its own year window. Read and filtered in Spark, so the monthly data
+# never passes through the driver; only a one-row summary is collected.
 monthly_path = f"{VOLUME_PATH}/era5_monthly.parquet"
 print(f"Loading monthly ERA5: {monthly_path}")
-monthly_clipped = pd.read_parquet(monthly_path)
-monthly_clipped = monthly_clipped[
-    (monthly_clipped["year"] >= ERA5_YEAR_START) & (monthly_clipped["year"] <= ERA5_YEAR_END)
-].reset_index(drop=True)
-if monthly_clipped.empty:
+monthly_clipped = (
+    spark.read.parquet(monthly_path)
+    .filter((F.col("year") >= ERA5_YEAR_START) & (F.col("year") <= ERA5_YEAR_END))
+)
+_summary = monthly_clipped.agg(
+    F.count(F.lit(1)).alias("rows"),
+    F.countDistinct("x", "y").alias("pixels"),
+    F.max(F.col("year") * 100 + F.col("month")).alias("last"),
+).first()
+if _summary["rows"] == 0:
     raise ValueError(f"no monthly rows for {COUNTRY_TAG} in {ERA5_YEAR_START}-{ERA5_YEAR_END}")
-print(f"Monthly ERA5: {len(monthly_clipped):,} rows, "
-      f"{monthly_clipped[['x', 'y']].drop_duplicates().shape[0]} pixels")
+print(f"Monthly ERA5: {_summary['rows']:,} rows, {_summary['pixels']} pixels")
 # Logged so a run with monthly_00 skipped (STEPS) shows which file it used.
 _built = pd.Timestamp(os.path.getmtime(monthly_path), unit="s").strftime("%Y-%m-%d %H:%M")
-_last = int((monthly_clipped["year"] * 100 + monthly_clipped["month"]).max())
-print(f"era5_monthly.parquet written {_built} UTC; last month used {_last}")
+print(f"era5_monthly.parquet written {_built} UTC; last month used {_summary['last']}")
 
 
 # -- Load Penman-Monteith PET (CRU TS 4.08) ----------------------------------
@@ -87,29 +93,43 @@ print(f"era5_monthly.parquet written {_built} UTC; last month used {_last}")
 # country's PET sits beside its own outputs under the same name.
 CRU_PET_PARQUET = os.path.join(VOLUME_PATH, "cru_pet_monthly.parquet")
 print(f"Loading CRU Penman-Monteith PET: {CRU_PET_PARQUET}")
-pet_df = pd.read_parquet(CRU_PET_PARQUET)[["x", "y", "year", "month", "pet_mm"]]
-pet_df = pet_df.drop_duplicates(subset=["x", "y", "year", "month"])
-pet_df["x"] = pet_df["x"].round(4)
-pet_df["y"] = pet_df["y"].round(4)
-print(f"PET loaded: {len(pet_df):,} rows, "
-      f"{pet_df[['x','y']].drop_duplicates().shape[0]} pixels, "
-      f"{pet_df.year.min()}-{pet_df.year.max()}, "
-      f"mean {pet_df.pet_mm.mean():.1f} mm/mo")
-
-
-# -- Join PET to clipped ERA5 (driver) ----------------------------------------
-# era5_daily_nn is on the SAME .125/.375/.625/.875 grid as the PET files,
-# so an exact (x, y, year, month) merge works — no grid snap needed.
-monthly_clipped["x"] = monthly_clipped["x"].round(4)
-monthly_clipped["y"] = monthly_clipped["y"].round(4)
-
-monthly_with_pet = monthly_clipped.merge(
-    pet_df, on=["x", "y", "year", "month"], how="inner"
+# Exact repeats are dropped. Two rows for the same pixel-month with different
+# PET cannot be resolved without picking one arbitrarily, so the script stops.
+pet_df = (
+    spark.read.parquet(CRU_PET_PARQUET)
+    .select("x", "y", "year", "month", "pet_mm")
+    .dropDuplicates()
+    .withColumn("x", F.round("x", 4))
+    .withColumn("y", F.round("y", 4))
 )
-monthly_with_pet["water_balance"] = monthly_with_pet["monthly_precip"] - monthly_with_pet["pet_mm"]
-pct = round(100 * len(monthly_with_pet) / max(len(monthly_clipped), 1), 1)
-print(f"After PET join: {len(monthly_with_pet):,} rows ({pct}% of clipped ERA5)")
-if len(monthly_with_pet) == 0:
+_pet = pet_df.agg(
+    F.count(F.lit(1)).alias("rows"),
+    F.countDistinct("x", "y", "year", "month").alias("keys"),
+    F.countDistinct("x", "y").alias("pixels"),
+    F.min("year").alias("y0"), F.max("year").alias("y1"),
+    F.mean("pet_mm").alias("mean"),
+).first()
+if _pet["rows"] != _pet["keys"]:
+    raise ValueError(f"{_pet['rows'] - _pet['keys']} pixel-month(s) in {CRU_PET_PARQUET} "
+                     f"carry two different PET values")
+print(f"PET loaded: {_pet['rows']:,} rows, {_pet['pixels']} pixels, "
+      f"{_pet['y0']}-{_pet['y1']}, mean {_pet['mean']:.1f} mm/mo")
+
+
+# -- Join PET to clipped ERA5 (Spark) -----------------------------------------
+# era5_daily_nn is on the SAME .125/.375/.625/.875 grid as the PET files,
+# so an exact (x, y, year, month) join works — no grid snap needed.
+monthly_with_pet = (
+    monthly_clipped
+    .withColumn("x", F.round("x", 4))
+    .withColumn("y", F.round("y", 4))
+    .join(pet_df, on=["x", "y", "year", "month"], how="inner")
+    .withColumn("water_balance", F.col("monthly_precip") - F.col("pet_mm"))
+)
+n_joined = monthly_with_pet.count()
+pct = round(100 * n_joined / max(_summary["rows"], 1), 1)
+print(f"After PET join: {n_joined:,} rows ({pct}% of clipped ERA5)")
+if n_joined == 0:
     raise ValueError("PET join produced 0 rows — check PET/ERA5 grid overlap")
 
 
@@ -178,9 +198,7 @@ def spei_p_udf(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # -- Distribute ---------------------------------------------------------------
-print("Creating Spark DataFrame from joined data...")
-monthly_sdf = spark.createDataFrame(monthly_with_pet)
-monthly_sdf = monthly_sdf.repartition(spark.sparkContext.defaultParallelism * 2, "x", "y")
+monthly_sdf = monthly_with_pet.repartition(spark.sparkContext.defaultParallelism * 2, "x", "y")
 
 print("Running SPEI-Penman via Pandas UDF (distributed)...")
 spei_p_sdf = monthly_sdf.groupby("x", "y").apply(spei_p_udf)

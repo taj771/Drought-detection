@@ -18,6 +18,10 @@
 # Two copies of the SAME version that disagree in value cannot be resolved by
 # that rule, so the script stops instead of keeping an arbitrary one.
 #
+# The country's grid cells are picked from the ERA5 grid table before any daily
+# row is read, so the dedupe, aggregation and collect below only ever see cells
+# inside the country -- not the ocean and neighbour cells of its bounding box.
+#
 # Output: era5_monthly.parquet in VOLUME_PATH, clipped to the country polygon.
 #   Columns: x, y, country, year, month, monthly_precip, mean_temp_monthly,
 #            n_days_observed, n_days_missing, days_in_month
@@ -42,6 +46,7 @@ OUT_PATH        = f"{VOLUME_PATH}/era5_monthly.parquet"
 # -----------------------------------------------------------------------------
 
 ERA5_TABLE     = "`era5-daily-data`.silver_staging.era5_daily_nn"
+GRID_TABLE     = "`era5-daily-data`.silver_staging.era5_nn_coord_mapping"
 BOUNDARY_TABLE = "`era5-daily-data`.silver_staging.esri_worldcountryboundaries_global_silver"
 KEY            = ["longitude", "latitude", "time"]
 VALUE_COLS     = ["sum_tp_mm", "mean_t2m_c", "max_t2m_c", "min_t2m_c"]
@@ -64,6 +69,7 @@ import os
 import geopandas as gpd
 from shapely import wkb
 from pyspark.sql import functions as F
+from pyspark.sql.types import StructType, StructField, FloatType, StringType
 
 print("Spark session active:", spark.version)
 
@@ -86,8 +92,85 @@ print(f"{COUNTRY_TAG}: {len(boundaries_gdf)} boundary features, "
       f"bbox lon [{bb[0]:.2f}, {bb[2]:.2f}], lat [{bb[1]:.2f}, {bb[3]:.2f}]")
 
 
-# -- Daily rows inside the bbox ------------------------------------------------
-# Bbox filter first so the dedupe window below runs on one country, not the globe.
+# -- Country grid cells, before any daily row is read -------------------------
+# The grid table lists every cell of era5_daily_nn once. Take the cells in the
+# bbox (a few hundred rows), then keep those whose centre falls within the
+# country polygon. Same sjoin(predicate="within") on cell centres as before, so
+# the pixel set is unchanged; only the order moved, from after the monthly
+# aggregation to before it.
+grid = (
+    spark.table(GRID_TABLE)
+    .select(F.col("target_lon").alias("lon_360"), F.col("target_lat").alias("latitude"))
+    .distinct()
+    .withColumn("lon_180",
+        F.when(F.col("lon_360") > 180, F.col("lon_360") - 360)
+         .otherwise(F.col("lon_360")))
+    .filter(
+        (F.col("lon_180")  >= float(bb[0])) & (F.col("lon_180")  <= float(bb[2])) &
+        (F.col("latitude") >= float(bb[1])) & (F.col("latitude") <= float(bb[3]))
+    )
+    .toPandas()
+)
+grid_gdf = gpd.GeoDataFrame(
+    grid, geometry=gpd.points_from_xy(grid["lon_180"], grid["latitude"]), crs=4326
+)
+joined = gpd.sjoin(grid_gdf, boundaries_gdf[["COUNTRY", "geometry"]],
+                   how="inner", predicate="within")
+cells = (
+    joined[["lon_360", "latitude", "COUNTRY"]]
+    .rename(columns={"COUNTRY": "country"})
+    .drop_duplicates(subset=["lon_360", "latitude"])
+)
+if cells.empty:
+    raise ValueError(f"no grid cell centre falls within {COUNTRY_TAG!r}")
+print(f"Country cells: {len(cells)} of {len(grid)} bbox cells inside boundary")
+
+# The grid table must list every cell the source has, or a country cell would
+# drop out silently. Check against one month of the source (year and month are
+# partition columns, so this reads a single partition).
+source_cells = (
+    spark.table(ERA5_TABLE)
+    .filter((F.col("year") == 2000) & (F.col("month") == 1))
+    .select("longitude", "latitude").distinct()
+    .withColumn("lon_180",
+        F.when(F.col("longitude") > 180, F.col("longitude") - 360)
+         .otherwise(F.col("longitude")))
+    .filter(
+        (F.col("lon_180")  >= float(bb[0])) & (F.col("lon_180")  <= float(bb[2])) &
+        (F.col("latitude") >= float(bb[1])) & (F.col("latitude") <= float(bb[3]))
+    )
+    .toPandas()
+)
+missing = (
+    source_cells.astype({"longitude": float, "latitude": float})
+    .merge(grid.astype({"lon_360": float, "latitude": float}),
+           left_on=["longitude", "latitude"], right_on=["lon_360", "latitude"],
+           how="left", indicator=True)
+    .query("_merge == 'left_only'")
+)
+if len(missing):
+    raise ValueError(
+        f"{len(missing)} source cell(s) in the bbox are absent from {GRID_TABLE}; "
+        f"the country cell list would miss them."
+    )
+
+# The source stores longitude and latitude as FLOAT; cast the cell list to the
+# same type so the join compares like with like. Every 0.25-degree value is
+# exact in FLOAT, so no cell is lost to rounding (checked after the collect).
+cells_spark = spark.createDataFrame(
+    cells.rename(columns={"lon_360": "longitude"}).astype({"longitude": "float32", "latitude": "float32"}),
+    schema=StructType([
+        StructField("longitude", FloatType(), False),
+        StructField("latitude",  FloatType(), False),
+        StructField("country",   StringType(), False),
+    ]),
+)
+
+
+# -- Daily rows for the country cells -----------------------------------------
+# The bbox filter stays: it costs nothing and lets Delta skip files by their
+# coordinate statistics. The broadcast join then drops the bbox cells outside
+# the country, so the dedupe window below runs on country cells only.
 daily = (
     spark.table(ERA5_TABLE)
     .withColumn("lon_180",
@@ -98,6 +181,7 @@ daily = (
         (F.col("lon_180")  >= float(bb[0])) & (F.col("lon_180")  <= float(bb[2])) &
         (F.col("latitude") >= float(bb[1])) & (F.col("latitude") <= float(bb[3]))
     )
+    .join(F.broadcast(cells_spark), on=["longitude", "latitude"], how="inner")
 )
 
 
@@ -149,7 +233,7 @@ monthly = (
     daily
     .withColumn("year",  F.year("time"))
     .withColumn("month", F.month("time"))
-    .groupBy("lon_180", "latitude", "year", "month")
+    .groupBy("lon_180", "latitude", "country", "year", "month")
     .agg(
         F.sum("sum_tp_mm").alias("monthly_precip"),
         F.avg("mean_t2m_c").alias("mean_temp_monthly"),
@@ -168,7 +252,7 @@ monthly = (
 print("Aggregating to monthly and collecting to driver...")
 monthly_df = monthly.toPandas()
 print(f"Collected: {len(monthly_df):,} pixel-months, "
-      f"{monthly_df[['x', 'y']].drop_duplicates().shape[0]} bbox pixels")
+      f"{monthly_df[['x', 'y']].drop_duplicates().shape[0]} country pixels")
 
 
 # -- Guards -------------------------------------------------------------------
@@ -223,27 +307,21 @@ if len(dropped):
     print(f"Dropped {len(dropped)} incomplete month(s); most recent: {shown}")
 
 
-# -- Polygon clip -------------------------------------------------------------
-# The bbox is a rectangle; it grabs ocean and neighbour-country cells. Clip the
-# distinct pixel grid to the country polygon. Same sjoin(predicate="within")
-# the index scripts used, so the pixel set is unchanged.
-pixels = complete[["x", "y"]].drop_duplicates().copy()
-pixels_gdf = gpd.GeoDataFrame(
-    pixels, geometry=gpd.points_from_xy(pixels["x"], pixels["y"]), crs=4326
-)
-joined = gpd.sjoin(pixels_gdf, boundaries_gdf[["COUNTRY", "geometry"]],
-                   how="left", predicate="within")
-pixels_with_country = (
-    joined[joined["COUNTRY"].notna()][["x", "y", "COUNTRY"]]
-    .rename(columns={"COUNTRY": "country"})
-    .drop_duplicates(subset=["x", "y"])
-)
-if pixels_with_country.empty:
-    raise ValueError(f"polygon clip removed every pixel for {COUNTRY_TAG!r}")
-print(f"Polygon clip: {len(pixels_with_country)} of {len(pixels)} bbox pixels inside boundary")
+# -- Every country cell came through the join ---------------------------------
+# A cell on the list with no daily rows means the join keys did not match
+# (longitude convention or type). Stop rather than write a country with holes.
+n_joined = monthly_df[["x", "y"]].drop_duplicates().shape[0]
+if n_joined != len(cells):
+    raise ValueError(
+        f"{len(cells) - n_joined} of {len(cells)} country cell(s) matched no daily "
+        f"rows in {ERA5_TABLE}; check the longitude convention of {GRID_TABLE}."
+    )
 
-out = complete.merge(pixels_with_country, on=["x", "y"], how="inner")
-out = out[[
+pixels_kept = complete[["x", "y"]].drop_duplicates().shape[0]
+if pixels_kept == 0:
+    raise ValueError(f"no complete month left for any cell of {COUNTRY_TAG!r}")
+
+out = complete[[
     "x", "y", "country", "year", "month",
     "monthly_precip", "mean_temp_monthly",
     "n_days_observed", "n_days_missing", "days_in_month",
@@ -256,7 +334,7 @@ out = out[[
 
 span_first = (out.year * 100 + out.month).min()
 span_last  = (out.year * 100 + out.month).max()
-print(f"Monthly series: {len(out):,} rows, {len(pixels_with_country)} pixels, "
+print(f"Monthly series: {len(out):,} rows, {pixels_kept} pixels, "
       f"{span_first} to {span_last}")
 
 

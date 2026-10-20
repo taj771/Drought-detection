@@ -48,9 +48,10 @@ import subprocess, sys
 def pip_install(pkg):
     subprocess.check_call([sys.executable, "-m", "pip", "install", pkg, "-q"])
 
-# Pinned: 3.0.0 changes SPI in zero-precipitation months. Must match
-# init_numpy_pin.sh. Fails loudly if the cluster has a different version.
-CLIMATE_INDICES = "2.4.0"
+# Pinned: releases can change SPI values (3.0.0 fixed the probability of zero
+# rainfall). Must match init_numpy_pin.sh. Fails loudly if the cluster has a
+# different version.
+CLIMATE_INDICES = "3.0.0"
 try:
     import climate_indices
 except ImportError:
